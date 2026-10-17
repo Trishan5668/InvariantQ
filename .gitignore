@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+
+# C++ builds
+*.o
+*.so
+core/libinvariantq.so
+core/src/*.o
+
+# Node
+node_modules/
+.npm/
+
+# InvariantQ local ledger
+.invariantq_ledger/
