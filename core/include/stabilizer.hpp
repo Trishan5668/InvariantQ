@@ -29,6 +29,7 @@ public:
 
     // Measurement
     int measure(size_t a, double rand_val);
+    void reset_qubit(size_t a, double rand_val = 0.0);
 
     // Diagnostics & extraction
     std::string to_string() const;

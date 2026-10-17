@@ -58,6 +58,33 @@ class DeviceTopology:
         edges = [(i, j) for i in range(n) for j in range(i + 1, n)]
         return cls(n, edges, name="all_to_all")
 
+    @classmethod
+    def star(cls, n: int) -> DeviceTopology:
+        """Star topology with qubit 0 at center and qubits 1..n-1 on periphery."""
+        edges = [(0, i) for i in range(1, n)]
+        return cls(n, edges, name=f"star_{n}")
+
+    @classmethod
+    def heavy_hex(cls, distance: int = 3) -> DeviceTopology:
+        """
+        Heavy-hex lattice topology (IBM Eagle / Heron architecture).
+        Consists of hexagonal rings with bridge qubits on edges.
+        """
+        edges = []
+        num_qubits = distance * distance * 3
+        for r in range(distance):
+            for c in range(distance):
+                idx = (r * distance + c) * 3
+                if idx + 1 < num_qubits:
+                    edges.append((idx, idx + 1))
+                if idx + 2 < num_qubits:
+                    edges.append((idx + 1, idx + 2))
+                if c + 1 < distance and idx + 3 < num_qubits:
+                    edges.append((idx + 2, idx + 3))
+                if r + 1 < distance and idx + distance * 3 < num_qubits:
+                    edges.append((idx, idx + distance * 3))
+        return cls(num_qubits, edges, name=f"heavy_hex_d{distance}")
+
 
 class QubitMappingPass:
     def __init__(self, topology: DeviceTopology):

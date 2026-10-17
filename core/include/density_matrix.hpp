@@ -28,6 +28,7 @@ public:
     std::vector<double> diagonal_probabilities() const;
 
     int measure(size_t target, double rand_val);
+    void reset_qubit(size_t target);
     double measure_probability(size_t target, int outcome) const;
     void collapse(size_t target, int outcome);
 

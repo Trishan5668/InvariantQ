@@ -8,13 +8,14 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from .base import BaseSimulator, ExecutionResult
-from ..ir.qir import CircuitIR, GateOp, NoiseOp
+from ..ir.qir import CircuitIR, GateOp, NoiseOp, ResetOp
 from ..core.binding import NativeDensityMatrix
 from ..noise.channels import build_kraus_channel
 
 class DensityMatrixSimulator(BaseSimulator):
-    def __init__(self):
+    def __init__(self, noise_model: Optional[Dict[str, List[np.ndarray]]] = None):
         super().__init__(name="density_matrix")
+        self.noise_model = noise_model
 
     def run(self, circuit: CircuitIR, shots: int = 1024, seed: int = 42) -> ExecutionResult:
         t0 = time.perf_counter()
@@ -34,8 +35,20 @@ class DensityMatrixSimulator(BaseSimulator):
                 qubits = [circuit.get_qubit_index(q) for q in op.qubits]
                 if len(qubits) == 1:
                     dm.apply_1q_unitary(qubits[0], op.matrix)
+                    if self.noise_model and op.name in self.noise_model:
+                        dm.apply_1q_kraus(qubits[0], self.noise_model[op.name])
                 elif len(qubits) == 2:
                     dm.apply_2q_unitary(qubits[0], qubits[1], op.matrix)
+                    if self.noise_model and op.name in self.noise_model:
+                        kraus = self.noise_model[op.name]
+                        if kraus[0].shape == (4, 4):
+                            dm.apply_2q_kraus(qubits[0], qubits[1], kraus)
+                        else:
+                            dm.apply_1q_kraus(qubits[0], kraus)
+                            dm.apply_1q_kraus(qubits[1], kraus)
+            elif isinstance(op, ResetOp):
+                q_idx = circuit.get_qubit_index(op.qubit)
+                dm.reset_qubit(q_idx)
             elif isinstance(op, NoiseOp):
                 qubits = [circuit.get_qubit_index(q) for q in op.qubits]
                 kraus_ops = build_kraus_channel(op.channel_name, op.params)

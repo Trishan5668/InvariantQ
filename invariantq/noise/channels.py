@@ -9,7 +9,7 @@ from typing import List, Dict, Tuple, Optional
 import numpy as np
 
 def build_kraus_channel(name: str, params: List[float]) -> List[np.ndarray]:
-    """
+    r"""
     Builds the Kraus operators {K_k} satisfying sum_k K_k^\dagger K_k = I.
     """
     name = name.lower()
@@ -64,17 +64,57 @@ def build_kraus_channel(name: str, params: List[float]) -> List[np.ndarray]:
         t1 = params[0] if len(params) > 0 else 50e-6
         t2 = params[1] if len(params) > 1 else 70e-6
         t_gate = params[2] if len(params) > 2 else 50e-9
+        t2 = min(t2, 2.0 * t1) # Physical constraint T2 <= 2 T1
         gamma = 1.0 - math.exp(-t_gate / t1) if t1 > 0 else 0.0
-        lam = 1.0 - math.exp(-t_gate / t2) if t2 > 0 else 0.0
-        # return amplitude damping combined with phase damping
-        return build_kraus_channel("amp_damping", [gamma])
+
+        inv_tphi = (1.0 / t2) - (1.0 / (2.0 * t1)) if (t1 > 0 and t2 > 0) else 0.0
+        lam = 1.0 - math.exp(-t_gate * max(0.0, inv_tphi))
+
+        k_amp = build_kraus_channel("amp_damping", [gamma])
+        k_phase = build_kraus_channel("phase_damping", [lam])
+        # Compose amplitude damping and pure phase damping
+        composed = []
+        for kp in k_phase:
+            for ka in k_amp:
+                composed.append(kp @ ka)
+        return composed
+
+    elif name in ("depolarizing_2q", "depol_2q"):
+        # 2-qubit depolarizing channel
+        p_val = min(1.0, max(0.0, p))
+        paulis = [
+            np.eye(2, dtype=np.complex128),
+            np.array([[0, 1], [1, 0]], dtype=np.complex128),
+            np.array([[0, -1j], [1j, 0]], dtype=np.complex128),
+            np.array([[1, 0], [0, -1]], dtype=np.complex128)
+        ]
+        ops = []
+        for i in range(4):
+            for j in range(4):
+                p_mat = np.kron(paulis[i], paulis[j])
+                if i == 0 and j == 0:
+                    weight = math.sqrt(max(0.0, 1.0 - (15.0 / 16.0) * p_val))
+                else:
+                    weight = math.sqrt((p_val / 16.0))
+                ops.append(weight * p_mat)
+        return ops
 
     # Default to identity
     return [np.eye(2, dtype=np.complex128)]
 
 
+def depolarizing_2q(p: float) -> List[np.ndarray]:
+    """Convenience helper for two-qubit depolarizing noise."""
+    return build_kraus_channel("depolarizing_2q", [p])
+
+
+def thermal_relaxation(t1: float, t2: float, gate_time: float) -> List[np.ndarray]:
+    """Convenience helper for physical thermal relaxation noise."""
+    return build_kraus_channel("thermal_relaxation", [t1, t2, gate_time])
+
+
 def compute_choi_matrix(kraus_ops: List[np.ndarray], dim: int = 2) -> np.ndarray:
-    """
+    r"""
     Computes the Choi-Jamiolkowski state matrix J(E) for the quantum channel:
     J(E) = sum_k (I (x) K_k) |Phi+><Phi+| (I (x) K_k)^\dagger
     where |Phi+> = 1/sqrt(dim) sum_{i=0}^{dim-1} |i>|i>.

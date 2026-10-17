@@ -15,6 +15,7 @@ void  iq_statevector_apply_1q(void* sv, size_t target, const double* u_real, con
 void  iq_statevector_apply_2q(void* sv, size_t q0, size_t q1, const double* u_real, const double* u_imag);
 void  iq_statevector_apply_fused(void* sv, const size_t* qubits, size_t k, const double* u_real, const double* u_imag);
 int   iq_statevector_measure(void* sv, size_t target, double rand_val);
+void  iq_statevector_reset_qubit(void* sv, size_t target, double rand_val);
 double iq_statevector_measure_prob(void* sv, size_t target, int outcome);
 void  iq_statevector_get_amplitudes(void* sv, double* real_out, double* imag_out);
 void  iq_statevector_get_probabilities(void* sv, double* probs_out);
@@ -34,11 +35,13 @@ double iq_density_matrix_trace(void* dm);
 double iq_density_matrix_purity(void* dm);
 double iq_density_matrix_entropy(void* dm);
 int   iq_density_matrix_measure(void* dm, size_t target, double rand_val);
+void  iq_density_matrix_reset_qubit(void* dm, size_t target);
 
 // Stabilizer API
 void* iq_stabilizer_create(size_t num_qubits);
 void  iq_stabilizer_free(void* stab);
 void  iq_stabilizer_reset(void* stab);
+void  iq_stabilizer_reset_qubit(void* stab, size_t a, double rand_val);
 void  iq_stabilizer_apply_h(void* stab, size_t a);
 void  iq_stabilizer_apply_s(void* stab, size_t a);
 void  iq_stabilizer_apply_sdg(void* stab, size_t a);

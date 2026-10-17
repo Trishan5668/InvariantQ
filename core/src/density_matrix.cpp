@@ -255,6 +255,19 @@ int DensityMatrix::measure(size_t target, double rand_val) {
     return outcome;
 }
 
+void DensityMatrix::reset_qubit(size_t target) {
+    if (target >= num_qubits_) throw std::out_of_range("Target qubit out of range");
+    // Project and flip branch 1: K0 = |0><0|, K1 = |0><1|
+    Gate1Q k0, k1;
+    k0.m[0] = complex_t(1.0, 0.0); k0.m[1] = complex_t(0.0, 0.0);
+    k0.m[2] = complex_t(0.0, 0.0); k0.m[3] = complex_t(0.0, 0.0);
+
+    k1.m[0] = complex_t(0.0, 0.0); k1.m[1] = complex_t(1.0, 0.0);
+    k1.m[2] = complex_t(0.0, 0.0); k1.m[3] = complex_t(0.0, 0.0);
+
+    apply_1q_kraus(target, {k0, k1});
+}
+
 std::vector<complex_t> DensityMatrix::partial_trace(const std::vector<size_t>& keep_qubits) const {
     size_t k = keep_qubits.size();
     size_t k_dim = 1ULL << k;

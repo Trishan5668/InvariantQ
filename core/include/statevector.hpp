@@ -27,6 +27,7 @@ public:
     void apply_fused_gate(const std::vector<size_t>& qubits, const complex_t* U, size_t k);
 
     int measure(size_t target, double rand_val);
+    void reset_qubit(size_t target, double rand_val = 0.0);
     double measure_probability(size_t target, int outcome) const;
     void collapse(size_t target, int outcome);
 

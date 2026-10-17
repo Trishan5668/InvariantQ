@@ -220,6 +220,13 @@ int StabilizerSimulator::measure(size_t a, double rand_val) {
     }
 }
 
+void StabilizerSimulator::reset_qubit(size_t a, double rand_val) {
+    int outcome = measure(a, rand_val);
+    if (outcome == 1) {
+        apply_x(a);
+    }
+}
+
 std::string StabilizerSimulator::get_pauli_row(size_t row_idx) const {
     std::string s = (r_[row_idx] == 1) ? "-" : "+";
     for (size_t j = 0; j < num_qubits_; ++j) {

@@ -74,6 +74,13 @@ if HAS_NATIVE_CORE:
     ]
     _NATIVE_LIB.iq_statevector_measure.restype = ctypes.c_int
 
+    _NATIVE_LIB.iq_statevector_reset_qubit.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.c_double,
+    ]
+    _NATIVE_LIB.iq_statevector_reset_qubit.restype = None
+
     _NATIVE_LIB.iq_statevector_measure_prob.argtypes = [
         ctypes.c_void_p,
         ctypes.c_size_t,
@@ -178,6 +185,12 @@ if HAS_NATIVE_CORE:
     ]
     _NATIVE_LIB.iq_density_matrix_measure.restype = ctypes.c_int
 
+    _NATIVE_LIB.iq_density_matrix_reset_qubit.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+    ]
+    _NATIVE_LIB.iq_density_matrix_reset_qubit.restype = None
+
     # Stabilizer
     _NATIVE_LIB.iq_stabilizer_create.argtypes = [ctypes.c_size_t]
     _NATIVE_LIB.iq_stabilizer_create.restype = ctypes.c_void_p
@@ -217,6 +230,9 @@ if HAS_NATIVE_CORE:
 
     _NATIVE_LIB.iq_stabilizer_measure.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_double]
     _NATIVE_LIB.iq_stabilizer_measure.restype = ctypes.c_int
+
+    _NATIVE_LIB.iq_stabilizer_reset_qubit.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_double]
+    _NATIVE_LIB.iq_stabilizer_reset_qubit.restype = None
 
     _NATIVE_LIB.iq_stabilizer_to_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t]
     _NATIVE_LIB.iq_stabilizer_to_string.restype = None
@@ -309,6 +325,9 @@ class NativeStateVector:
 
     def measure(self, target: int, rand_val: float) -> int:
         return _NATIVE_LIB.iq_statevector_measure(self._ptr, target, rand_val)
+
+    def reset_qubit(self, target: int, rand_val: float = 0.0):
+        _NATIVE_LIB.iq_statevector_reset_qubit(self._ptr, target, rand_val)
 
     def measure_prob(self, target: int, outcome: int) -> float:
         return _NATIVE_LIB.iq_statevector_measure_prob(self._ptr, target, outcome)
@@ -432,6 +451,9 @@ class NativeDensityMatrix:
     def measure(self, target: int, rand_val: float) -> int:
         return _NATIVE_LIB.iq_density_matrix_measure(self._ptr, target, rand_val)
 
+    def reset_qubit(self, target: int):
+        _NATIVE_LIB.iq_density_matrix_reset_qubit(self._ptr, target)
+
 
 class NativeStabilizer:
     def __init__(self, num_qubits: int):
@@ -479,6 +501,9 @@ class NativeStabilizer:
 
     def measure(self, a: int, rand_val: float) -> int:
         return _NATIVE_LIB.iq_stabilizer_measure(self._ptr, a, rand_val)
+
+    def reset_qubit(self, a: int, rand_val: float = 0.0):
+        _NATIVE_LIB.iq_stabilizer_reset_qubit(self._ptr, a, rand_val)
 
     def to_string(self) -> str:
         buf = ctypes.create_string_buffer(4096)

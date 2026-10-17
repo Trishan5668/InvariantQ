@@ -21,6 +21,20 @@ class HardwareModel:
     readout_error: ReadoutError = field(default_factory=lambda: ReadoutError(0.015, 0.02))
 
     @classmethod
+    def ibm_falcon_27(cls) -> HardwareModel:
+        topo = DeviceTopology.heavy_hex(distance=3)
+        return cls(
+            name="IBM_Falcon_27",
+            num_qubits=27,
+            topology=topo,
+            t1_avg_us=110.0,
+            t2_avg_us=130.0,
+            single_qubit_error=0.00018,
+            two_qubit_error=0.0065,
+            readout_error=ReadoutError(0.010, 0.015)
+        )
+
+    @classmethod
     def ibm_eagle_127(cls) -> HardwareModel:
         # Simplified linear/hex backbone representation
         topo = DeviceTopology.linear(127)

@@ -12,7 +12,7 @@ class CPTPValidationError(Exception):
     pass
 
 def validate_cptp(kraus_ops: List[np.ndarray], tol: float = 1e-10) -> Dict[str, Any]:
-    """
+    r"""
     Rigorously verifies CPTP criteria for a set of Kraus operators:
     1. Completeness / Trace Preservation: sum_k K_k^\dagger K_k = I
     2. Complete Positivity: Choi matrix J(E) is Positive Semidefinite (eigenvalues >= -tol)

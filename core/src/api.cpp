@@ -61,6 +61,11 @@ int iq_statevector_measure(void* sv, size_t target, double rand_val) {
     return static_cast<StateVector*>(sv)->measure(target, rand_val);
 }
 
+void iq_statevector_reset_qubit(void* sv, size_t target, double rand_val) {
+    if (!sv) return;
+    static_cast<StateVector*>(sv)->reset_qubit(target, rand_val);
+}
+
 double iq_statevector_measure_prob(void* sv, size_t target, int outcome) {
     if (!sv) return 0.0;
     return static_cast<StateVector*>(sv)->measure_probability(target, outcome);
@@ -181,6 +186,11 @@ int iq_density_matrix_measure(void* dm, size_t target, double rand_val) {
     return static_cast<DensityMatrix*>(dm)->measure(target, rand_val);
 }
 
+void iq_density_matrix_reset_qubit(void* dm, size_t target) {
+    if (!dm) return;
+    static_cast<DensityMatrix*>(dm)->reset_qubit(target);
+}
+
 // ==================== Stabilizer ====================
 
 void* iq_stabilizer_create(size_t num_qubits) {
@@ -197,6 +207,11 @@ void iq_stabilizer_free(void* stab) {
 
 void iq_stabilizer_reset(void* stab) {
     if (stab) static_cast<StabilizerSimulator*>(stab)->reset();
+}
+
+void iq_stabilizer_reset_qubit(void* stab, size_t a, double rand_val) {
+    if (!stab) return;
+    static_cast<StabilizerSimulator*>(stab)->reset_qubit(a, rand_val);
 }
 
 void iq_stabilizer_apply_h(void* stab, size_t a) {

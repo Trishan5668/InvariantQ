@@ -43,7 +43,13 @@ class TensorNetworkSimulator(BaseSimulator):
         probs: Dict[str, float] = {}
 
         if n <= 16:
-            statevector = mps.to_statevector()
+            raw_sv = mps.to_statevector()
+            # Convert MPS big-endian representation (site 0 = MSB) to canonical little-endian (qubit k = 1 << k)
+            if n > 1:
+                t = raw_sv.reshape([2] * n)
+                statevector = np.transpose(t, list(reversed(range(n)))).flatten()
+            else:
+                statevector = raw_sv
             p_vec = np.abs(statevector) ** 2
             p_sum = np.sum(p_vec)
             if p_sum > 0:

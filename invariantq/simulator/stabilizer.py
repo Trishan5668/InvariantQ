@@ -61,6 +61,10 @@ class StabilizerSimulator(BaseSimulator):
                     elif gname == "z":
                         stab.z(qubits[0])
 
+                elif isinstance(op, ResetOp):
+                    q_idx = circuit.get_qubit_index(op.qubit)
+                    stab.reset_qubit(q_idx, rng.random())
+
                 elif isinstance(op, MeasureOp):
                     q_idx = circuit.get_qubit_index(op.qubit)
                     r_val = rng.random()

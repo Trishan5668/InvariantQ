@@ -194,6 +194,15 @@ int StateVector::measure(size_t target, double rand_val) {
     return outcome;
 }
 
+void StateVector::reset_qubit(size_t target, double rand_val) {
+    if (target >= num_qubits_) throw std::out_of_range("Target qubit out of range");
+    int outcome = measure(target, rand_val);
+    if (outcome == 1) {
+        complex_t X[4] = {complex_t(0, 0), complex_t(1, 0), complex_t(1, 0), complex_t(0, 0)};
+        apply_1q_gate(target, X);
+    }
+}
+
 double StateVector::norm_squared() const {
     double sum = 0.0;
     #pragma omp parallel for reduction(+:sum) schedule(static)

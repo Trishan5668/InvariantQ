@@ -56,7 +56,7 @@ class FaultInjectionTester:
         }
 
     def test_broken_cptp_channel_detection(self) -> Dict[str, Any]:
-        """
+        r"""
         Seeds a broken non-CPTP Kraus channel (missing operator, sum K^\dagger K != I)
         and verifies that CPTP validator catches it.
         """

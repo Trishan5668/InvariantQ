@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from .base import BaseSimulator, ExecutionResult
-from ..ir.qir import CircuitIR, GateOp, MeasureOp, FusedGateOp
+from ..ir.qir import CircuitIR, GateOp, MeasureOp, ResetOp, FusedGateOp
 from ..core.binding import NativeStateVector, HAS_NATIVE_CORE
 
 class StateVectorSimulator(BaseSimulator):
@@ -38,6 +38,9 @@ class StateVectorSimulator(BaseSimulator):
             elif isinstance(op, FusedGateOp):
                 qubits = [circuit.get_qubit_index(q) for q in op.qubits]
                 sv.apply_fused(qubits, op.fused_matrix)
+            elif isinstance(op, ResetOp):
+                q_idx = circuit.get_qubit_index(op.qubit)
+                sv.reset_qubit(q_idx)
 
         # Get final statevector & probabilities
         amps = sv.get_amplitudes()

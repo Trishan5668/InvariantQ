@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Tuple, Union
 import numpy as np
 
-CLIFFORD_GATES = {"h", "s", "sdg", "x", "y", "z", "cx", "cz", "swap", "cnot"}
+CLIFFORD_GATES = {"h", "s", "sdg", "x", "y", "z", "cx", "cz", "cy", "swap", "cnot", "i", "id"}
 
 @dataclass
 class QWire:
@@ -120,12 +120,69 @@ class GateOp(IROp):
                 [0, 0, 0, 1],
                 [0, 0, 1, 0]
             ], dtype=np.complex128)
+        elif n == "cy":
+            return np.array([
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, 0, -1j],
+                [0, 0, 1j, 0]
+            ], dtype=np.complex128)
         elif n == "cz":
             return np.array([
                 [1, 0, 0, 0],
                 [0, 1, 0, 0],
                 [0, 0, 1, 0],
                 [0, 0, 0, -1]
+            ], dtype=np.complex128)
+        elif n == "ch":
+            return np.array([
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, inv_sqrt2, inv_sqrt2],
+                [0, 0, inv_sqrt2, -inv_sqrt2]
+            ], dtype=np.complex128)
+        elif n == "iswap":
+            return np.array([
+                [1, 0, 0, 0],
+                [0, 0, 1j, 0],
+                [0, 1j, 0, 0],
+                [0, 0, 0, 1]
+            ], dtype=np.complex128)
+        elif n == "crx":
+            theta = p[0] if p else 0.0
+            c = math.cos(theta / 2.0)
+            s = math.sin(theta / 2.0)
+            return np.array([
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, c, -1j * s],
+                [0, 0, -1j * s, c]
+            ], dtype=np.complex128)
+        elif n == "cry":
+            theta = p[0] if p else 0.0
+            c = math.cos(theta / 2.0)
+            s = math.sin(theta / 2.0)
+            return np.array([
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, c, -s],
+                [0, 0, s, c]
+            ], dtype=np.complex128)
+        elif n == "crz":
+            theta = p[0] if p else 0.0
+            return np.array([
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, np.exp(-1j * theta / 2.0), 0],
+                [0, 0, 0, np.exp(1j * theta / 2.0)]
+            ], dtype=np.complex128)
+        elif n == "cp" or n == "cphase":
+            theta = p[0] if p else 0.0
+            return np.array([
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, 1, 0],
+                [0, 0, 0, np.exp(1j * theta)]
             ], dtype=np.complex128)
         elif n == "swap":
             return np.array([
@@ -134,6 +191,20 @@ class GateOp(IROp):
                 [0, 1, 0, 0],
                 [0, 0, 0, 1]
             ], dtype=np.complex128)
+        elif n == "ccx" or n == "toffoli":
+            m = np.eye(8, dtype=np.complex128)
+            m[6, 6] = 0
+            m[6, 7] = 1
+            m[7, 6] = 1
+            m[7, 7] = 0
+            return m
+        elif n == "cswap" or n == "fredkin":
+            m = np.eye(8, dtype=np.complex128)
+            m[5, 5] = 0
+            m[5, 6] = 1
+            m[6, 5] = 1
+            m[6, 6] = 0
+            return m
         return np.eye(2 ** len(self.qubits), dtype=np.complex128)
 
 @dataclass
