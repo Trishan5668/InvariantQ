@@ -7,6 +7,12 @@ Deutsch-Jozsa, QPE, and Randomized Benchmarking protocols.
 
 import json
 import time
+import sys
+from pathlib import Path
+
+# Permit ``python scripts/run_benchmarks.py`` from a source checkout without
+# requiring an editable installation first.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from invariantq.benchmarks.runner import BenchmarkRunner
 from invariantq.benchmarks.vqe import VQESolver
 from invariantq.benchmarks.grover import create_grover_circuit
@@ -15,6 +21,7 @@ from invariantq.benchmarks.qpe import create_qpe_circuit
 from invariantq.benchmarks.randomized_benchmarking import run_randomized_benchmarking
 from invariantq.simulator.statevector import StateVectorSimulator
 from invariantq.reproducibility.ledger import ReproducibilityLedger
+from invariantq.core.binding import HAS_NATIVE_CORE
 
 def main():
     print("=" * 68)
@@ -38,8 +45,11 @@ def main():
     for s in scaling_res:
         print(f"  {s['num_qubits']:<8} {s['dimension']:<12} {s['memory_bytes']/1024:<14.1f} {s['execution_time_ms']:<12.2f}")
 
-    print("\n[3/6] Running Stabilizer Scaling Benchmark (10 to 200 Qubits)...")
-    stab_res = runner.benchmark_stabilizer_scaling([10, 50, 100, 200])
+    stabilizer_range = [10, 50, 100, 200] if HAS_NATIVE_CORE else [10]
+    print(f"\n[3/6] Running Stabilizer Scaling Benchmark ({stabilizer_range[0]} to {stabilizer_range[-1]} Qubits)...")
+    if not HAS_NATIVE_CORE:
+        print("  Native tableau unavailable; portable dense fallback is limited to 24 qubits.")
+    stab_res = runner.benchmark_stabilizer_scaling(stabilizer_range)
     for st in stab_res:
         print(f"  {st['num_qubits']} Qubits: {st['execution_time_ms']:.2f} ms")
 

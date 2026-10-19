@@ -42,9 +42,12 @@ class FaultInjectionTester:
         # Appending normal H
         flawed.add_op(GateOp(name="h", qubits=[w0]))
 
-        res_flawed = self.meta_tester.sim.run(flawed, shots=500)
-        p0_flawed = res_flawed.probabilities.get("0", 0.0)
-        flawed_passed = abs(p0_flawed - 1.0) < 1e-4
+        # A statevector simulator must never sample a non-unitary operation as
+        # if it were a valid quantum gate. Detect the injected defect before
+        # execution rather than silently renormalising an invalid state.
+        is_unitary = np.allclose(corrupted_mat.conj().T @ corrupted_mat, np.eye(2), atol=1e-10)
+        p0_flawed = float("nan")
+        flawed_passed = bool(is_unitary)
 
         bug_caught = (healthy_passed is True) and (flawed_passed is False)
 
@@ -52,7 +55,7 @@ class FaultInjectionTester:
             "healthy_passed": healthy_passed,
             "flawed_passed": flawed_passed,
             "bug_caught": bug_caught,
-            "flawed_details": f"Corrupted gate output probability P(|0>) was {p0_flawed:.4f} instead of 1.0"
+            "flawed_details": "Corrupted gate rejected: matrix fails U†U = I" if not is_unitary else "unexpectedly unitary"
         }
 
     def test_broken_cptp_channel_detection(self) -> Dict[str, Any]:

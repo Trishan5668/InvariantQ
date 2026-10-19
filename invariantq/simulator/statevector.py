@@ -29,12 +29,18 @@ class StateVectorSimulator(BaseSimulator):
         for op in circuit.ops:
             if isinstance(op, GateOp):
                 qubits = [circuit.get_qubit_index(q) for q in op.qubits]
+                expected_dim = 1 << len(qubits)
+                matrix = np.asarray(op.matrix, dtype=np.complex128)
+                if (matrix.shape != (expected_dim, expected_dim) or
+                        not np.isfinite(matrix).all() or
+                        not np.allclose(matrix.conj().T @ matrix, np.eye(expected_dim), atol=1e-10, rtol=1e-10)):
+                    raise ValueError(f"Gate '{op.name}' is not a finite unitary matrix")
                 if len(qubits) == 1:
-                    sv.apply_1q(qubits[0], op.matrix)
+                    sv.apply_1q(qubits[0], matrix)
                 elif len(qubits) == 2:
-                    sv.apply_2q(qubits[0], qubits[1], op.matrix)
+                    sv.apply_2q(qubits[0], qubits[1], matrix)
                 else:
-                    sv.apply_fused(qubits, op.matrix)
+                    sv.apply_fused(qubits, matrix)
             elif isinstance(op, FusedGateOp):
                 qubits = [circuit.get_qubit_index(q) for q in op.qubits]
                 sv.apply_fused(qubits, op.fused_matrix)

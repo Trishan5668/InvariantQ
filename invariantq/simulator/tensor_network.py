@@ -10,7 +10,7 @@ import numpy as np
 
 from .base import BaseSimulator, ExecutionResult
 from ..ir.qir import CircuitIR, GateOp, MeasureOp
-from ..core.binding import NativeMPS
+from ..core.binding import NativeMPS, HAS_NATIVE_CORE
 
 class TensorNetworkSimulator(BaseSimulator):
     def __init__(self, max_bond_dim: int = 64, cutoff: float = 1e-12):
@@ -45,7 +45,7 @@ class TensorNetworkSimulator(BaseSimulator):
         if n <= 16:
             raw_sv = mps.to_statevector()
             # Convert MPS big-endian representation (site 0 = MSB) to canonical little-endian (qubit k = 1 << k)
-            if n > 1:
+            if n > 1 and HAS_NATIVE_CORE:
                 t = raw_sv.reshape([2] * n)
                 statevector = np.transpose(t, list(reversed(range(n)))).flatten()
             else:

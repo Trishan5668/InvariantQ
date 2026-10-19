@@ -569,3 +569,165 @@ class NativeMPS:
 
     def measure(self, target: int, rand_val: float) -> int:
         return _NATIVE_LIB.iq_mps_measure(self._ptr, target, rand_val)
+
+
+# The C++ core is an optional acceleration layer.  Keep the public binding
+# usable on platforms where no compatible shared library was built (notably
+# Windows) so that correctness does not depend on a particular compiler.
+if not HAS_NATIVE_CORE:
+    def _apply_unitary(state: np.ndarray, num_qubits: int, qubits: List[int], matrix: np.ndarray) -> np.ndarray:
+        """Apply a matrix using the canonical little-endian qubit convention."""
+        if len(set(qubits)) != len(qubits) or any(q < 0 or q >= num_qubits for q in qubits):
+            raise ValueError("gate qubits must be distinct valid qubit indices")
+        k = len(qubits)
+        matrix = np.asarray(matrix, dtype=np.complex128)
+        if matrix.shape != (1 << k, 1 << k):
+            raise ValueError("gate matrix dimension does not match its qubits")
+        # In Fortran order axis q corresponds to little-endian global bit q.
+        # Move the targeted axes first, apply the local matrix to all remaining
+        # amplitudes at once, then restore the original axis order.
+        rest = [q for q in range(num_qubits) if q not in qubits]
+        axes = list(qubits) + rest
+        tensor = state.reshape([2] * num_qubits, order="F")
+        moved = np.transpose(tensor, axes).reshape(1 << k, -1)
+        transformed = (matrix @ moved).reshape([2] * num_qubits)
+        inverse_axes = np.argsort(axes)
+        return np.transpose(transformed, inverse_axes).reshape(-1, order="F")
+
+    class NativeStateVector:
+        def __init__(self, num_qubits: int):
+            if num_qubits < 0 or num_qubits > 24:
+                raise ValueError("fallback statevector supports 0 through 24 qubits")
+            self.num_qubits, self.dim = num_qubits, 1 << num_qubits
+            self.reset()
+
+        def reset(self):
+            self._state = np.zeros(self.dim, dtype=np.complex128)
+            self._state[0] = 1.0
+
+        def apply_1q(self, target: int, matrix: np.ndarray):
+            self._state = _apply_unitary(self._state, self.num_qubits, [target], matrix)
+
+        def apply_2q(self, q0: int, q1: int, matrix: np.ndarray):
+            self._state = _apply_unitary(self._state, self.num_qubits, [q0, q1], matrix)
+
+        def apply_fused(self, qubits: List[int], matrix: np.ndarray):
+            self._state = _apply_unitary(self._state, self.num_qubits, qubits, matrix)
+
+        def measure_prob(self, target: int, outcome: int) -> float:
+            if outcome not in (0, 1):
+                raise ValueError("measurement outcome must be 0 or 1")
+            return float(np.sum(np.abs(self._state[[i for i in range(self.dim) if ((i >> target) & 1) == outcome]]) ** 2))
+
+        def measure(self, target: int, rand_val: float) -> int:
+            if not 0.0 <= rand_val < 1.0:
+                raise ValueError("random value must be in [0, 1)")
+            p0 = self.measure_prob(target, 0)
+            outcome = 0 if rand_val < p0 else 1
+            mask = np.array([((i >> target) & 1) == outcome for i in range(self.dim)])
+            self._state[~mask] = 0
+            norm = np.linalg.norm(self._state)
+            if norm == 0:
+                raise RuntimeError("measurement selected a zero-probability outcome")
+            self._state /= norm
+            return outcome
+
+        def reset_qubit(self, target: int, rand_val: float = 0.0):
+            if self.measure(target, rand_val) == 1:
+                self.apply_1q(target, np.array([[0, 1], [1, 0]], dtype=np.complex128))
+
+        def get_amplitudes(self) -> np.ndarray:
+            return self._state.copy()
+
+        def get_probabilities(self) -> np.ndarray:
+            return np.abs(self._state) ** 2
+
+        def sample(self, num_shots: int, seed: int = 42) -> np.ndarray:
+            if num_shots < 0:
+                raise ValueError("num_shots must be non-negative")
+            return np.random.default_rng(seed).choice(self.dim, size=num_shots, p=self.get_probabilities())
+
+        def von_neumann_entropy(self, subsystem_qubits: List[int]) -> float:
+            subsystem_qubits = list(subsystem_qubits)
+            if len(set(subsystem_qubits)) != len(subsystem_qubits):
+                raise ValueError("subsystem qubits must be unique")
+            rest = [q for q in range(self.num_qubits) if q not in subsystem_qubits]
+            tensor = self._state.reshape([2] * self.num_qubits, order="F")
+            matrix = np.transpose(tensor, subsystem_qubits + rest).reshape(1 << len(subsystem_qubits), -1)
+            eigvals = np.linalg.eigvalsh(matrix @ matrix.conj().T)
+            eigvals = eigvals[eigvals > 1e-15]
+            return float(-np.sum(eigvals * np.log2(eigvals)))
+
+        def expectation_value_pauli(self, pauli_str: str, qubits: List[int]) -> complex:
+            matrices = {"I": np.eye(2), "X": np.array([[0, 1], [1, 0]]),
+                        "Y": np.array([[0, -1j], [1j, 0]]), "Z": np.array([[1, 0], [0, -1]])}
+            if len(pauli_str) != len(qubits) or any(p not in matrices for p in pauli_str):
+                raise ValueError("invalid Pauli observable")
+            operated = self._state.copy()
+            for p, q in zip(pauli_str, qubits):
+                operated = _apply_unitary(operated, self.num_qubits, [q], matrices[p])
+            return complex(np.vdot(self._state, operated))
+
+    class NativeDensityMatrix:
+        def __init__(self, num_qubits: int):
+            if num_qubits < 0 or num_qubits > 12:
+                raise ValueError("fallback density matrix supports 0 through 12 qubits")
+            self.num_qubits, self.dim = num_qubits, 1 << num_qubits
+            self.reset()
+
+        def reset(self):
+            self._matrix = np.zeros((self.dim, self.dim), dtype=np.complex128)
+            self._matrix[0, 0] = 1.0
+
+        def _apply(self, qubits, matrix):
+            # Apply U rho U† by applying U to each column, then to each row.
+            left = np.column_stack([_apply_unitary(self._matrix[:, j], self.num_qubits, qubits, matrix) for j in range(self.dim)])
+            self._matrix = np.vstack([_apply_unitary(left[i, :].conj(), self.num_qubits, qubits, matrix).conj() for i in range(self.dim)])
+
+        def apply_1q_unitary(self, target, matrix): self._apply([target], matrix)
+        def apply_2q_unitary(self, q0, q1, matrix): self._apply([q0, q1], matrix)
+        def apply_1q_kraus(self, target, kraus_ops):
+            original = self._matrix.copy()
+            accumulated = np.zeros_like(original)
+            for op in kraus_ops:
+                self._matrix = original.copy()
+                self._apply([target], op)
+                accumulated += self._matrix
+            self._matrix = accumulated
+
+        def get_matrix(self): return self._matrix.copy()
+        def trace(self): return float(np.real(np.trace(self._matrix)))
+        def purity(self): return float(np.real(np.trace(self._matrix @ self._matrix)))
+        def von_neumann_entropy(self):
+            vals = np.linalg.eigvalsh(self._matrix)
+            vals = vals[vals > 1e-15]
+            return float(-np.sum(vals * np.log2(vals)))
+        def measure(self, target, rand_val):
+            p0 = float(sum(self._matrix[i, i].real for i in range(self.dim) if not ((i >> target) & 1)))
+            outcome = 0 if rand_val < p0 else 1
+            keep = np.array([((i >> target) & 1) == outcome for i in range(self.dim)])
+            self._matrix[~keep, :] = self._matrix[:, ~keep] = 0
+            self._matrix /= (p0 if outcome == 0 else 1 - p0)
+            return outcome
+        def reset_qubit(self, target):
+            if self.measure(target, 0.0) == 1:
+                self.apply_1q_unitary(target, np.array([[0, 1], [1, 0]], dtype=np.complex128))
+
+    class NativeMPS(NativeStateVector):
+        def __init__(self, num_qubits, max_bond_dim=64, cutoff=1e-12):
+            self.max_bond_dim, self.cutoff = max_bond_dim, cutoff
+            super().__init__(num_qubits)
+        def entanglement_entropy(self, bond_idx): return self.von_neumann_entropy(list(range(bond_idx + 1)))
+        def to_statevector(self): return self.get_amplitudes()
+
+    class NativeStabilizer(NativeStateVector):
+        def h(self, a): self.apply_1q(a, np.array([[1, 1], [1, -1]], dtype=np.complex128) / np.sqrt(2))
+        def s(self, a): self.apply_1q(a, np.diag([1, 1j]))
+        def sdg(self, a): self.apply_1q(a, np.diag([1, -1j]))
+        def x(self, a): self.apply_1q(a, np.array([[0, 1], [1, 0]], dtype=np.complex128))
+        def y(self, a): self.apply_1q(a, np.array([[0, -1j], [1j, 0]], dtype=np.complex128))
+        def z(self, a): self.apply_1q(a, np.diag([1, -1]))
+        def cnot(self, a, b): self.apply_2q(a, b, np.array([[1,0,0,0],[0,1,0,0],[0,0,0,1],[0,0,1,0]], dtype=np.complex128))
+        def cz(self, a, b): self.apply_2q(a, b, np.diag([1,1,1,-1]))
+        def swap(self, a, b): self.apply_2q(a, b, np.array([[1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]], dtype=np.complex128))
+        def to_string(self): return "python-statevector fallback"

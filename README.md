@@ -1,13 +1,13 @@
-# INVARIANTQ: A Research-Grade Quantum Computing Platform
+# INVARIANTQ: Quantum Computing Research Platform
 
-[![Tests](https://img.shields.io/badge/tests-39%20passed-success)](https://github.com/Trishan5668/InvariantQ)
+[![Tests](https://img.shields.io/badge/tests-51%20passed-success)](https://github.com/Trishan5668/InvariantQ)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Architecture](https://img.shields.io/badge/architecture-C%2B%2B%20%2F%20Python%20%2F%20React-cyan)](docs/ARCHITECTURE.md)
-[![Status](https://img.shields.io/badge/status-Research--Grade%20Validated-green)](docs/SPECIFICATION.md)
+[![Status](https://img.shields.io/badge/status-validated%20scope%20documented-yellow)](docs/VALIDATION_STATUS.md)
 
 **INVARIANTQ** is a full-stack, research-grade quantum computing platform and orchestrated runtime integrating a custom quantum programming language (`IQ-Lang`), an optimizing compiler, multi-modal simulation backends (exact state-vector, open-system density matrix, Clifford stabilizer, and matrix product state tensor networks), rigorous CPTP noise channels, a fault-tolerant distributed execution planner, a verification suite (differential and metamorphic testing), and an interactive web studio.
 
-All algorithms, optimizations, and architectures are grounded in peer-reviewed literature and empirically validated by reproducible benchmarks ([CITATIONS.md](docs/CITATIONS.md)).
+Validation evidence and platform-specific limitations are recorded in [VALIDATION_STATUS.md](docs/VALIDATION_STATUS.md). Claims outside that documented scope are experimental, not established performance or correctness guarantees.
 
 ---
 
@@ -99,17 +99,18 @@ InvariantQ/
 
 ### 1. Build C++ Core
 ```bash
+# Linux/macOS native build (requires a compatible C++17/OpenMP toolchain)
 ./scripts/build_core.sh
 ```
 
 ### 2. Run Test Suite
 ```bash
-pytest tests/ -v
+python -m pytest -q
 ```
 
 ### 3. Run Performance Benchmarks
 ```bash
-./scripts/run_benchmarks.py
+python -u scripts/run_benchmarks.py
 ```
 
 ### 4. CLI Usage Examples

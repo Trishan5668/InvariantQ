@@ -10,7 +10,7 @@ import numpy as np
 
 from .base import BaseSimulator, ExecutionResult
 from ..ir.qir import CircuitIR, GateOp, MeasureOp, ResetOp
-from ..core.binding import NativeStabilizer
+from ..core.binding import NativeStabilizer, HAS_NATIVE_CORE
 
 class StabilizerSimulator(BaseSimulator):
     def __init__(self):
@@ -32,6 +32,40 @@ class StabilizerSimulator(BaseSimulator):
 
         # Memory used: 2n * (2n+1) bytes for tableau
         mem_bytes = (2 * n) * (2 * n + 1)
+
+        # The portable fallback has no tableau; for circuits without explicit
+        # mid-circuit measurements, evolve once and sample its final state.
+        # This preserves sampling semantics while avoiding O(shots) dense-state
+        # evolution for large Clifford examples.
+        if not HAS_NATIVE_CORE and not any(isinstance(op, MeasureOp) for op in circuit.ops):
+            stab = NativeStabilizer(n)
+            for op in circuit.ops:
+                if isinstance(op, GateOp):
+                    qubits = [circuit.get_qubit_index(q) for q in op.qubits]
+                    gname = op.name.lower()
+                    if gname == "h": stab.h(qubits[0])
+                    elif gname == "s": stab.s(qubits[0])
+                    elif gname == "sdg": stab.sdg(qubits[0])
+                    elif gname in ("cx", "cnot"): stab.cnot(qubits[0], qubits[1])
+                    elif gname == "cz": stab.cz(qubits[0], qubits[1])
+                    elif gname == "swap": stab.swap(qubits[0], qubits[1])
+                    elif gname == "x": stab.x(qubits[0])
+                    elif gname == "y": stab.y(qubits[0])
+                    elif gname == "z": stab.z(qubits[0])
+                elif isinstance(op, ResetOp):
+                    stab.reset_qubit(circuit.get_qubit_index(op.qubit), rng.random())
+            samples = stab.sample(shots, seed)
+            for sample in samples:
+                # Stabilizer results are indexed by qubit number (q[0] first).
+                bitstr = "".join(str((int(sample) >> q) & 1) for q in range(n))
+                counts[bitstr] = counts.get(bitstr, 0) + 1
+            probs = {k: v / shots for k, v in counts.items()}
+            return ExecutionResult(
+                counts=counts, probabilities=probs,
+                execution_time_ms=(time.perf_counter() - t0) * 1000.0,
+                backend_used="stabilizer", memory_used_bytes=mem_bytes, shots=shots,
+                metadata={"num_qubits": n, "tableau": "portable statevector fallback"},
+            )
 
         # Run multiple shots with measurement collapse
         for s in range(shots):
