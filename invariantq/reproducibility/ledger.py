@@ -32,6 +32,11 @@ class ExperimentManifest:
     shots: int
     execution_time_ms: float
     hash_digest: str = ""
+    schema_version: str = "1.0"
+    circuit_qasm: str = ""
+    result: Dict[str, Any] = field(default_factory=dict)
+    status: str = "completed"
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 class ReproducibilityLedger:
     def __init__(self, ledger_dir: str = ".invariantq_ledger"):
@@ -49,7 +54,10 @@ class ReproducibilityLedger:
         master_seed: int,
         shots: int,
         execution_time_ms: float,
-        extra_metadata: Optional[Dict[str, Any]] = None
+        extra_metadata: Optional[Dict[str, Any]] = None,
+        circuit_qasm: str = "",
+        result: Optional[Dict[str, Any]] = None,
+        status: str = "completed",
     ) -> ExperimentManifest:
         # Determine git commit
         git_commit = "unknown"
@@ -80,6 +88,11 @@ class ReproducibilityLedger:
             "gate_count": gate_count,
             "shots": shots,
             "execution_time_ms": execution_time_ms,
+            "schema_version": "1.0",
+            "circuit_qasm": circuit_qasm,
+            "result": result or {},
+            "status": status,
+            "metadata": extra_metadata or {},
         }
 
         # SHA256 digest
@@ -94,3 +107,71 @@ class ReproducibilityLedger:
             json.dump(asdict(manifest), f, indent=2)
 
         return manifest
+
+    @staticmethod
+    def validate_manifest(manifest: Dict[str, Any]) -> None:
+        """Validate the stable fields required for replay."""
+        required = {
+            "schema_version", "experiment_id", "backend", "master_seed",
+            "shots", "circuit_qasm", "status",
+        }
+        missing = sorted(required.difference(manifest))
+        if missing:
+            raise ValueError(f"manifest is missing required fields: {', '.join(missing)}")
+        if manifest["schema_version"] != "1.0":
+            raise ValueError(f"unsupported experiment manifest schema: {manifest['schema_version']}")
+        if not isinstance(manifest["circuit_qasm"], str) or not manifest["circuit_qasm"].strip():
+            raise ValueError("manifest circuit_qasm must be a non-empty string")
+        if isinstance(manifest["shots"], bool) or not isinstance(manifest["shots"], int) or manifest["shots"] <= 0:
+            raise ValueError("manifest shots must be a positive integer")
+        if isinstance(manifest["master_seed"], bool) or not isinstance(manifest["master_seed"], int) or manifest["master_seed"] < 0:
+            raise ValueError("manifest master_seed must be a non-negative integer")
+        if manifest["status"] not in {"completed", "failed", "cancelled"}:
+            raise ValueError("manifest status must be completed, failed, or cancelled")
+
+    def export_manifest(self, manifest: ExperimentManifest, path: str) -> str:
+        """Write deterministic JSON and return its SHA-256 checksum."""
+        payload = asdict(manifest)
+        self.validate_manifest(payload)
+        encoded = json.dumps(payload, sort_keys=True, indent=2).encode("utf-8")
+        digest = hashlib.sha256(encoded).hexdigest()
+        with open(path, "wb") as handle:
+            handle.write(encoded)
+        return digest
+
+    @staticmethod
+    def load_manifest(path: str) -> Dict[str, Any]:
+        with open(path, encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        if not isinstance(manifest, dict):
+            raise ValueError("experiment manifest must contain a JSON object")
+        ReproducibilityLedger.validate_manifest(manifest)
+        return manifest
+
+    @staticmethod
+    def replay_manifest(manifest: Dict[str, Any]) -> Any:
+        """Replay a stored circuit using the recorded backend and seed."""
+        ReproducibilityLedger.validate_manifest(manifest)
+        if manifest["status"] != "completed":
+            raise ValueError("only completed manifests can be replayed")
+        from ..language.qasm_parser import parse_iq_lang
+        from ..simulator.adaptive import AdaptivePlannerSimulator
+        from ..simulator.density_matrix import DensityMatrixSimulator
+        from ..simulator.statevector import StateVectorSimulator
+        from ..simulator.stabilizer import StabilizerSimulator
+        from ..simulator.tensor_network import TensorNetworkSimulator
+
+        backends = {
+            "adaptive": AdaptivePlannerSimulator,
+            "statevector": StateVectorSimulator,
+            "density_matrix": DensityMatrixSimulator,
+            "stabilizer": StabilizerSimulator,
+            "tensor_network": TensorNetworkSimulator,
+        }
+        backend = manifest["backend"]
+        if backend not in backends:
+            raise ValueError(f"unsupported replay backend: {backend}")
+        circuit = parse_iq_lang(manifest["circuit_qasm"])
+        return backends[backend]().run(
+            circuit, shots=manifest["shots"], seed=manifest["master_seed"]
+        )

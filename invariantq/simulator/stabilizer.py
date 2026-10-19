@@ -23,6 +23,10 @@ class StabilizerSimulator(BaseSimulator):
         if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)) or seed < 0:
             raise ValueError("seed must be a non-negative integer")
         n = circuit.num_qubits
+        if not bool(getattr(NativeStabilizer, "is_genuine_tableau", False)):
+            raise RuntimeError(
+                "stabilizer backend unavailable: a genuine tableau implementation is required"
+            )
 
         # Check if circuit is strictly Clifford
         for op in circuit.ops:
@@ -69,7 +73,15 @@ class StabilizerSimulator(BaseSimulator):
                 metadata={"num_qubits": n, "tableau": stab.to_string(),
                           "algorithm": getattr(stab, "implementation", "native-binary-tableau"),
                           "tableau_memory_bytes": getattr(stab, "tableau_memory_bytes", mem_bytes),
-                          "core": native_core_status()},
+                          "core": native_core_status(),
+                          "provenance": {
+                              "requested_backend": self.name,
+                              "selected_backend": "stabilizer",
+                              "implementation": "stabilizer_tableau",
+                              "native": HAS_NATIVE_CORE,
+                              "exact": True,
+                              "completion": "completed",
+                          }},
             )
 
         # Run multiple shots with measurement collapse
@@ -155,5 +167,13 @@ class StabilizerSimulator(BaseSimulator):
             shots=shots,
             metadata={"num_qubits": n, "tableau": stab_repr,
                       "algorithm": "native-binary-tableau" if HAS_NATIVE_CORE else getattr(NativeStabilizer, "implementation", "unknown"),
-                      "core": native_core_status()}
+                      "core": native_core_status(),
+                      "provenance": {
+                          "requested_backend": self.name,
+                          "selected_backend": "stabilizer",
+                          "implementation": "stabilizer_tableau",
+                          "native": HAS_NATIVE_CORE,
+                          "exact": True,
+                          "completion": "completed",
+                      }}
         )

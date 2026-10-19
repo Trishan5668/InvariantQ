@@ -26,9 +26,11 @@ class PlannerDecision:
     capability: Optional[Dict[str, Any]] = None
 
 class AdaptivePlannerSimulator(BaseSimulator):
-    def __init__(self, max_memory_bytes: int = 16 * (1024**3)): # 16 GB default RAM budget
+    def __init__(self, max_memory_bytes: int = 16 * (1024**3),
+                 allow_complexity_changing_fallback: bool = False): # 16 GB default RAM budget
         super().__init__(name="adaptive")
         self.max_memory_bytes = max_memory_bytes
+        self.allow_complexity_changing_fallback = allow_complexity_changing_fallback
         self.sv_sim = StateVectorSimulator()
         self.dm_sim = DensityMatrixSimulator()
         self.mps_sim = TensorNetworkSimulator()
@@ -45,6 +47,15 @@ class AdaptivePlannerSimulator(BaseSimulator):
             incompatible = compatibility_reason(circuit, capability)
             if incompatible:
                 raise ValueError(f"Cannot select {name}: {incompatible}")
+            if (
+                capability.algorithm == "dense_statevector"
+                and name in {"stabilizer", "tensor_network"}
+                and not self.allow_complexity_changing_fallback
+            ):
+                raise RuntimeError(
+                    f"adaptive selection rejected: requested scalable backend {name} "
+                    "has no genuine implementation; explicit complexity-changing fallback is disabled"
+                )
             return PlannerDecision(name, reason, memory, exact, capability.to_dict())
 
         # Rule 1: Noisy circuit
@@ -107,4 +118,14 @@ class AdaptivePlannerSimulator(BaseSimulator):
         res.metadata["estimated_memory_bytes"] = decision.estimated_memory_bytes
         res.metadata["is_exact"] = decision.is_exact
         res.metadata["backend_capability"] = decision.capability
+        res.metadata["provenance"] = {
+            "requested_backend": "adaptive",
+            "selected_backend": decision.backend_name,
+            "implementation": decision.capability["algorithm"],
+            "native": decision.capability["native"],
+            "exact": decision.is_exact,
+            "selection_reason": decision.reason,
+            "resource_limit_bytes": self.max_memory_bytes,
+            "completion": "completed",
+        }
         return res

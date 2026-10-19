@@ -1173,14 +1173,12 @@ if not HAS_NATIVE_CORE:
 
         @staticmethod
         def _g(x1: int, z1: int, x2: int, z2: int) -> int:
-            if not x1 and not z1:
-                return 0
-            if x1 and z1:  # Y
-                return 1 if x2 and not z2 else -1 if not x2 and z2 else 0
-            if x1:  # X
-                return 1 if not x2 and z2 else -1 if x2 and z2 else 0
-            # Z
-            return 1 if x2 and z2 else -1 if x2 and not z2 else 0
+            # The tableau represents each Pauli as i**r X**x Z**z.
+            # Multiplication contributes (-1)**(z1*x2), i.e. two units
+            # in the quarter-turn phase exponent.  Keeping this primitive
+            # in the same representation for every row operation avoids
+            # lookup-table sign drift during random measurements.
+            return 2 * (z1 & x2)
 
         def _row_mult(self, target: int, source: int):
             total = 2 * int(self._r[target]) + 2 * int(self._r[source])

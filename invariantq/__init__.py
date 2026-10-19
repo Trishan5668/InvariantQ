@@ -29,6 +29,13 @@ from .benchmarks.grover import create_grover_circuit
 from .benchmarks.vqe import VQESolver
 from .benchmarks.suite import create_ghz_circuit, create_random_clifford_circuit, create_random_circuit
 from .reproducibility.ledger import ReproducibilityLedger
+from .execution import (
+    CancellationToken,
+    ExecutionContext,
+    ExecutionLimits,
+    ResourcePool,
+)
+from .faults import FaultCategory, FaultScenario, FaultReport, RuntimeFaultSandbox
 
 __version__ = "1.0.0"
 
@@ -71,4 +78,12 @@ __all__ = [
     "create_random_clifford_circuit",
     "create_random_circuit",
     "ReproducibilityLedger",
+    "CancellationToken",
+    "ExecutionContext",
+    "ExecutionLimits",
+    "ResourcePool",
+    "FaultCategory",
+    "FaultScenario",
+    "FaultReport",
+    "RuntimeFaultSandbox",
 ]

@@ -13,10 +13,12 @@ from ..ir.qir import CircuitIR, GateOp, MeasureOp
 from ..core.binding import NativeMPS, HAS_NATIVE_CORE, native_core_status
 
 class TensorNetworkSimulator(BaseSimulator):
-    def __init__(self, max_bond_dim: int = 64, cutoff: float = 1e-12):
+    def __init__(self, max_bond_dim: int = 64, cutoff: float = 1e-12,
+                 max_memory_bytes: Optional[int] = None):
         super().__init__(name="tensor_network")
         self.max_bond_dim = max_bond_dim
         self.cutoff = cutoff
+        self.max_memory_bytes = max_memory_bytes
 
     def run(self, circuit: CircuitIR, shots: int = 1024, seed: int = 42) -> ExecutionResult:
         t0 = time.perf_counter()
@@ -25,9 +27,18 @@ class TensorNetworkSimulator(BaseSimulator):
         if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)) or seed < 0:
             raise ValueError("seed must be a non-negative integer")
         n = circuit.num_qubits
+        if not bool(getattr(NativeMPS, "is_genuine_mps", False)):
+            raise RuntimeError(
+                "tensor-network backend unavailable: a genuine MPS implementation is required"
+            )
 
         mps = NativeMPS(n, max_bond_dim=self.max_bond_dim, cutoff=self.cutoff)
         mem_bytes = n * 2 * (self.max_bond_dim ** 2) * 16
+        if self.max_memory_bytes is not None and mem_bytes > self.max_memory_bytes:
+            raise MemoryError(
+                f"MPS resource estimate {mem_bytes} bytes exceeds configured limit "
+                f"{self.max_memory_bytes}"
+            )
 
         for op in circuit.ops:
             if isinstance(op, GateOp):
@@ -93,6 +104,18 @@ class TensorNetworkSimulator(BaseSimulator):
             memory_used_bytes=mem_bytes,
             shots=shots,
             metadata={"num_qubits": n, "max_bond_dim": self.max_bond_dim,
-                      "algorithm": "native-mps" if HAS_NATIVE_CORE else "dense-statevector compatibility fallback",
+                      "algorithm": "matrix_product_state",
+                      "implementation": "native-mps" if HAS_NATIVE_CORE else "python-mps",
+                      "is_approximate": bool(getattr(mps, "is_approximate", True)),
+                      "bond_dimensions": list(getattr(mps, "bond_dimensions", ())),
+                      "provenance": {
+                          "requested_backend": self.name,
+                          "selected_backend": "tensor_network",
+                          "implementation": "matrix_product_state",
+                          "native": HAS_NATIVE_CORE,
+                          "exact": not bool(getattr(mps, "is_approximate", True)),
+                          "resource_limit_bytes": self.max_memory_bytes,
+                          "completion": "completed",
+                      },
                       "core": native_core_status()}
         )

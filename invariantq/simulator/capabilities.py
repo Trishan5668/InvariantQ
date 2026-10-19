@@ -25,6 +25,8 @@ class BackendCapability:
     complexity: str
     independently_validated: bool
     limitations: str
+    native: bool = False
+    algorithm: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         value = asdict(self)
@@ -49,6 +51,7 @@ def backend_capabilities() -> Dict[str, BackendCapability]:
             max_qubits=None if native else 24, complexity="O(2^n) memory and per gate",
             independently_validated=True,
             limitations="Noise operations are unsupported; fallback allocation is capped at 24 qubits.",
+            native=native, algorithm="dense_statevector",
         ),
         "density_matrix": BackendCapability(
             name="density_matrix", implementation="native-cpp" if native else "numpy-density-matrix",
@@ -57,6 +60,7 @@ def backend_capabilities() -> Dict[str, BackendCapability]:
             max_qubits=14 if native else 12, complexity="O(4^n) memory and gate work",
             independently_validated=False,
             limitations="Two-qubit noise-model application is not exposed by the portable binding.",
+            native=native, algorithm="density_matrix",
         ),
         "stabilizer": BackendCapability(
             name="stabilizer",
@@ -69,6 +73,7 @@ def backend_capabilities() -> Dict[str, BackendCapability]:
             independently_validated=False,
             limitations=("Non-Clifford gates and noise are rejected." if stabilizer_is_tableau else
                          "This fallback allocates a dense statevector and is not scalable."),
+            native=native, algorithm="stabilizer_tableau" if stabilizer_is_tableau else "dense_statevector",
         ),
         "tensor_network": BackendCapability(
             name="tensor_network",
@@ -80,6 +85,7 @@ def backend_capabilities() -> Dict[str, BackendCapability]:
             independently_validated=False,
             limitations=("Approximate when bond truncation discards weight; non-unitary noise is unsupported."
                          if mps_is_genuine else "This fallback allocates a dense statevector and is not scalable."),
+            native=native, algorithm="matrix_product_state" if mps_is_genuine else "dense_statevector",
         ),
     }
 

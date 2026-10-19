@@ -18,18 +18,50 @@ def validate_cptp(kraus_ops: List[np.ndarray], tol: float = 1e-10) -> Dict[str, 
     2. Complete Positivity: Choi matrix J(E) is Positive Semidefinite (eigenvalues >= -tol)
     3. Action on random density matrices preserves trace=1 and positivity.
     """
-    dim = kraus_ops[0].shape[0]
+    if not kraus_ops:
+        return {
+            "is_cptp": False,
+            "is_trace_preserving": False,
+            "is_completely_positive": False,
+            "trace_preserving_residual": float("inf"),
+            "choi_min_eigenvalue": float("-inf"),
+            "random_density_tests_passed": False,
+            "validation_error": "at least one Kraus operator is required",
+        }
+    arrays = [np.asarray(k, dtype=np.complex128) for k in kraus_ops]
+    first_shape = arrays[0].shape
+    if len(first_shape) != 2 or first_shape[0] != first_shape[1]:
+        return {
+            "is_cptp": False,
+            "is_trace_preserving": False,
+            "is_completely_positive": False,
+            "trace_preserving_residual": float("inf"),
+            "choi_min_eigenvalue": float("-inf"),
+            "random_density_tests_passed": False,
+            "validation_error": "Kraus operators must be square matrices",
+        }
+    if any(k.shape != first_shape or not np.isfinite(k).all() for k in arrays):
+        return {
+            "is_cptp": False,
+            "is_trace_preserving": False,
+            "is_completely_positive": False,
+            "trace_preserving_residual": float("inf"),
+            "choi_min_eigenvalue": float("-inf"),
+            "random_density_tests_passed": False,
+            "validation_error": "Kraus operators must have equal dimensions and finite entries",
+        }
+    dim = first_shape[0]
 
     # Check 1: Trace Preservation
     sum_k_dag_k = np.zeros((dim, dim), dtype=np.complex128)
-    for k in kraus_ops:
+    for k in arrays:
         sum_k_dag_k += k.conj().T @ k
 
     tp_diff = np.linalg.norm(sum_k_dag_k - np.eye(dim, dtype=np.complex128))
     is_trace_preserving = bool(tp_diff <= tol)
 
     # Check 2: Complete Positivity via Choi Matrix
-    choi = compute_choi_matrix(kraus_ops, dim=dim)
+    choi = compute_choi_matrix(arrays, dim=dim)
     choi_eigs = np.linalg.eigvalsh(choi)
     min_choi_eig = float(np.min(choi_eigs))
     is_completely_positive = bool(min_choi_eig >= -tol)
@@ -45,7 +77,7 @@ def validate_cptp(kraus_ops: List[np.ndarray], tol: float = 1e-10) -> Dict[str, 
 
         # Apply channel
         rho_out = np.zeros((dim, dim), dtype=np.complex128)
-        for k in kraus_ops:
+        for k in arrays:
             rho_out += k @ rho_in @ k.conj().T
 
         # Verify trace = 1

@@ -7,28 +7,30 @@ import time
 from typing import Dict, List, Optional
 import numpy as np
 
-from .base import BaseSimulator, ExecutionResult
+from .base import BaseSimulator, ExecutionResult, checked_power_of_two
 from ..ir.qir import CircuitIR, GateOp, NoiseOp, ResetOp
 from ..core.binding import NativeDensityMatrix, native_core_status
 from ..noise.channels import build_kraus_channel
 
 class DensityMatrixSimulator(BaseSimulator):
-    def __init__(self, noise_model: Optional[Dict[str, List[np.ndarray]]] = None):
+    def __init__(self, noise_model: Optional[Dict[str, List[np.ndarray]]] = None,
+                 max_memory_bytes: Optional[int] = None):
         super().__init__(name="density_matrix")
         self.noise_model = noise_model
+        self.max_memory_bytes = max_memory_bytes
 
     def run(self, circuit: CircuitIR, shots: int = 1024, seed: int = 42) -> ExecutionResult:
         t0 = time.perf_counter()
         n = circuit.num_qubits
-        if n > 14:
+        mem_bytes = checked_power_of_two(n, 16, copies=1 << n)
+        if n > 14 or (self.max_memory_bytes is not None and mem_bytes > self.max_memory_bytes):
             raise MemoryError(
-                f"Density matrix requires 16^{n} bytes ({((1 << (2*n)) * 16) / (1024**3):.2f} GB). "
+                f"Density matrix requires approximately {mem_bytes} bytes. "
                 f"For n > 14, please use StateVector or TensorNetwork (MPS) backend."
             )
 
         dm = NativeDensityMatrix(n)
         dim = 1 << n
-        mem_bytes = (dim * dim) * 16
 
         for op in circuit.ops:
             if isinstance(op, GateOp):
@@ -97,5 +99,14 @@ class DensityMatrixSimulator(BaseSimulator):
                 "trace": trace,
                 "purity": purity,
                 "core": native_core_status(),
+                "provenance": {
+                    "requested_backend": self.name,
+                    "selected_backend": "density_matrix",
+                    "implementation": "density_matrix",
+                    "native": native_core_status()["active"],
+                    "exact": True,
+                    "resource_limit_bytes": self.max_memory_bytes,
+                    "completion": "completed",
+                },
             }
         )

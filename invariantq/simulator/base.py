@@ -39,3 +39,15 @@ class BaseSimulator:
 
     def run(self, circuit: CircuitIR, shots: int = 1024, seed: int = 42) -> ExecutionResult:
         raise NotImplementedError
+
+
+def checked_power_of_two(qubits: int, bytes_per_amplitude: int, *,
+                         copies: int = 1) -> int:
+    """Return an overflow-safe dense allocation estimate."""
+    if isinstance(qubits, bool) or not isinstance(qubits, int) or qubits < 0:
+        raise ValueError("qubits must be a non-negative integer")
+    if copies <= 0 or bytes_per_amplitude <= 0:
+        raise ValueError("allocation estimate parameters must be positive")
+    if qubits >= 62:
+        raise MemoryError("requested dense allocation exceeds supported integer range")
+    return (1 << qubits) * bytes_per_amplitude * copies

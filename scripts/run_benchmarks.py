@@ -49,7 +49,7 @@ def main():
     stabilizer_range = [10, 50, 100, 200] if HAS_NATIVE_CORE else [10]
     print(f"\n[3/6] Running Stabilizer Scaling Benchmark ({stabilizer_range[0]} to {stabilizer_range[-1]} Qubits)...")
     if not HAS_NATIVE_CORE:
-        print("  Native tableau unavailable; portable dense fallback is limited to 24 qubits.")
+        print("  Native C++ core unavailable; portable Python binary tableau is used.")
     stab_res = runner.benchmark_stabilizer_scaling(stabilizer_range)
     for st in stab_res:
         print(f"  {st['num_qubits']} Qubits: {st['execution_time_ms']:.2f} ms")
