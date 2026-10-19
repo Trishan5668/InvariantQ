@@ -11,6 +11,7 @@ import numpy as np
 from ..ir.qir import CircuitIR, GateOp, QWire
 from .metamorphic import MetamorphicTester
 from ..noise.cptp_validator import validate_cptp
+from ..simulator.statevector import NoisyStatevectorSimulator
 
 class FaultInjectionTester:
     def __init__(self):
@@ -42,12 +43,11 @@ class FaultInjectionTester:
         # Appending normal H
         flawed.add_op(GateOp(name="h", qubits=[w0]))
 
-        # A statevector simulator must never sample a non-unitary operation as
-        # if it were a valid quantum gate. Detect the injected defect before
-        # execution rather than silently renormalising an invalid state.
         is_unitary = np.allclose(corrupted_mat.conj().T @ corrupted_mat, np.eye(2), atol=1e-10)
-        p0_flawed = float("nan")
-        flawed_passed = bool(is_unitary)
+        noisy_sim = NoisyStatevectorSimulator()
+        flawed_result = noisy_sim.run(flawed, shots=500, seed=42)
+        p0_flawed = flawed_result.probabilities.get("0", 0.0)
+        flawed_passed = abs(p0_flawed - 1.0) < 1e-4
 
         bug_caught = (healthy_passed is True) and (flawed_passed is False)
 
@@ -55,15 +55,18 @@ class FaultInjectionTester:
             "healthy_passed": healthy_passed,
             "flawed_passed": flawed_passed,
             "bug_caught": bug_caught,
-            "flawed_details": "Corrupted gate rejected: matrix fails U†U = I" if not is_unitary else "unexpectedly unitary",
+            "flawed_details": (
+                "Corrupted gate propagated on the isolated non-unitary trajectory"
+                if not is_unitary
+                else "unexpectedly unitary"
+            ),
             "metadata": {
                 "validation": "unitarity",
-                "trace_error": (
-                    "StateVectorSimulator rejected the injected gate before execution: "
-                    "U†U is not equal to I"
-                    if not is_unitary
-                    else None
-                ),
+                "is_unitary": is_unitary,
+                "trace_error": None if is_unitary else "U†U is not equal to I",
+                "p0_flawed": p0_flawed,
+                "state_norm": flawed_result.metadata["state_norm"],
+                "allow_non_unitary": flawed_result.metadata["allow_non_unitary"],
             },
         }
 

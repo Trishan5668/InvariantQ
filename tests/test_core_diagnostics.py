@@ -24,4 +24,6 @@ def test_fallback_structures_and_fault_rejection_telemetry():
     telemetry = FaultInjectionTester().test_corrupted_gate_detection()
     assert telemetry["bug_caught"] is True
     assert telemetry["metadata"]["validation"] == "unitarity"
-    assert "rejected" in telemetry["metadata"]["trace_error"]
+    assert telemetry["metadata"]["is_unitary"] is False
+    assert telemetry["metadata"]["allow_non_unitary"] is True
+    assert telemetry["metadata"]["state_norm"] != pytest.approx(1.0)

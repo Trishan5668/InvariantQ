@@ -90,3 +90,26 @@ def test_fallback_stabilizer_and_mps_are_not_dense_statevectors():
     assert mps.is_approximate is False
     with pytest.raises(ValueError, match="limited to"):
         binding.NativeMPS(21).to_statevector()
+
+
+def test_non_unitary_execution_isolated_from_safe_statevector():
+    from invariantq.simulator.statevector import NoisyStatevectorSimulator
+    from invariantq.ir.qir import CircuitIR, GateOp, QWire
+
+    circuit = CircuitIR("non_unitary")
+    circuit.add_qubit_register("q", 1)
+    circuit.add_op(
+        GateOp(
+            name="broken",
+            qubits=[QWire("q", 0)],
+            matrix=np.array([[2.0, 0.0], [0.0, 1.0]], dtype=np.complex128),
+        )
+    )
+
+    with pytest.raises(ValueError, match="finite unitary"):
+        from invariantq.simulator.statevector import StateVectorSimulator
+        StateVectorSimulator().run(circuit, shots=4)
+
+    result = NoisyStatevectorSimulator().run(circuit, shots=4, seed=1)
+    assert result.metadata["allow_non_unitary"] is True
+    assert result.metadata["state_norm"] == pytest.approx(4.0)

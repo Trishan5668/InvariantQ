@@ -16,7 +16,14 @@ class StateVectorSimulator(BaseSimulator):
     def __init__(self):
         super().__init__(name="statevector")
 
-    def run(self, circuit: CircuitIR, shots: int = 1024, seed: int = 42) -> ExecutionResult:
+    def run(
+        self,
+        circuit: CircuitIR,
+        shots: int = 1024,
+        seed: int = 42,
+        *,
+        allow_non_unitary: bool = False,
+    ) -> ExecutionResult:
         t0 = time.perf_counter()
         if isinstance(shots, bool) or not isinstance(shots, (int, np.integer)) or shots <= 0:
             raise ValueError("shots must be a positive integer")
@@ -35,9 +42,17 @@ class StateVectorSimulator(BaseSimulator):
                 qubits = [circuit.get_qubit_index(q) for q in op.qubits]
                 expected_dim = 1 << len(qubits)
                 matrix = np.asarray(op.matrix, dtype=np.complex128)
-                if (matrix.shape != (expected_dim, expected_dim) or
-                        not np.isfinite(matrix).all() or
-                        not np.allclose(matrix.conj().T @ matrix, np.eye(expected_dim), atol=1e-10, rtol=1e-10)):
+                is_valid_unitary = (
+                    matrix.shape == (expected_dim, expected_dim)
+                    and np.isfinite(matrix).all()
+                    and np.allclose(
+                        matrix.conj().T @ matrix,
+                        np.eye(expected_dim),
+                        atol=1e-10,
+                        rtol=1e-10,
+                    )
+                )
+                if not is_valid_unitary and not allow_non_unitary:
                     raise ValueError(f"Gate '{op.name}' is not a finite unitary matrix")
                 if len(qubits) == 1:
                     sv.apply_1q(qubits[0], matrix)
@@ -63,7 +78,17 @@ class StateVectorSimulator(BaseSimulator):
             entropy = sv.von_neumann_entropy(subsystem)
 
         # Sample shots
-        samples = sv.sample(shots, seed)
+        if allow_non_unitary:
+            total_probability = float(np.sum(probs_vec))
+            if not np.isfinite(total_probability) or total_probability <= 0.0:
+                raise ValueError("non-unitary trajectory produced an invalid state norm")
+            samples = np.random.default_rng(seed).choice(
+                1 << n,
+                size=shots,
+                p=np.asarray(probs_vec, dtype=np.float64) / total_probability,
+            )
+        else:
+            samples = sv.sample(shots, seed)
         counts: Dict[str, int] = {}
         for s in samples:
             # format as binary string
@@ -87,5 +112,30 @@ class StateVectorSimulator(BaseSimulator):
             backend_used="statevector",
             memory_used_bytes=mem_bytes,
             shots=shots,
-            metadata={"num_qubits": n, "dimension": 1 << n, "core": native_core_status()}
+            metadata={
+                "num_qubits": n,
+                "dimension": 1 << n,
+                "allow_non_unitary": allow_non_unitary,
+                "state_norm": float(np.sum(probs_vec)),
+                "core": native_core_status(),
+            }
+        )
+
+
+class NoisyStatevectorSimulator(StateVectorSimulator):
+    """Isolated fault-analysis statevector path allowing unphysical gates."""
+
+    def run(
+        self,
+        circuit: CircuitIR,
+        shots: int = 1024,
+        seed: int = 42,
+        *,
+        allow_non_unitary: bool = True,
+    ) -> ExecutionResult:
+        return super().run(
+            circuit,
+            shots=shots,
+            seed=seed,
+            allow_non_unitary=True,
         )
