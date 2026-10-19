@@ -4,6 +4,7 @@ import {
   Server, RefreshCw, AlertTriangle, CheckCircle2,
   Terminal, BarChart3, Database, Sliders, Box, GitBranch
 } from 'lucide-react';
+import { ApiError, apiRequest, postJson } from './api';
 
 const PRESETS: Record<string, string> = {
   "Bell State (EPR)": `qubit q[2];
@@ -79,6 +80,15 @@ export default function App() {
 
   const [loading, setLoading] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string>('Ready');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const reportError = (error: unknown) => {
+    const message = error instanceof ApiError
+      ? `${error.message}${error.details ? ` Details: ${error.details}` : ''}`
+      : error instanceof Error ? error.message : 'Unexpected application error.';
+    setErrorMsg(message);
+    setStatusMsg('Request failed');
+  };
 
   useEffect(() => {
     fetchCluster();
@@ -87,33 +97,22 @@ export default function App() {
 
   const fetchCluster = async () => {
     try {
-      const res = await fetch('/api/cluster');
-      if (res.ok) {
-        const data = await res.json();
-        setClusterInfo(data);
-      }
-    } catch (e) {}
+      setClusterInfo(await apiRequest('/api/cluster'));
+    } catch (error) {
+      reportError(error);
+    }
   };
 
   const handleCompile = async () => {
     setLoading(true);
+    setErrorMsg(null);
     setStatusMsg('Compiling and running optimization passes...');
     try {
-      const res = await fetch('/api/compile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, opt_level: optLevel, topology })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setCompileResult(data);
-        setStatusMsg('Compilation complete');
-      } else {
-        alert(data.message || 'Compilation error');
-        setStatusMsg('Compilation failed');
-      }
-    } catch (e: any) {
-      alert(e.message);
+      const data = await postJson('/api/compile', { code, opt_level: optLevel, topology });
+      setCompileResult(data);
+      setStatusMsg('Compilation complete');
+    } catch (error) {
+      reportError(error);
     } finally {
       setLoading(false);
     }
@@ -121,24 +120,15 @@ export default function App() {
 
   const handleRun = async () => {
     setLoading(true);
+    setErrorMsg(null);
     setStatusMsg(`Simulating on ${backend} backend...`);
     try {
-      const res = await fetch('/api/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, backend, shots, seed })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSimResult(data);
-        setStatusMsg(`Simulation successful (${data.backend_used})`);
-        if (activeTab === 'studio') setActiveTab('visualizer');
-      } else {
-        alert(data.message || 'Simulation error');
-        setStatusMsg('Simulation failed');
-      }
-    } catch (e: any) {
-      alert(e.message);
+      const data = await postJson('/api/run', { code, backend, shots, seed });
+      setSimResult(data);
+      setStatusMsg(`Simulation successful (${data.backend_used})`);
+      if (activeTab === 'studio') setActiveTab('visualizer');
+    } catch (error) {
+      reportError(error);
     } finally {
       setLoading(false);
     }
@@ -146,23 +136,15 @@ export default function App() {
 
   const handleDistributedRun = async () => {
     setLoading(true);
+    setErrorMsg(null);
     setStatusMsg('Dispatching job to distributed worker cluster...');
     try {
-      const res = await fetch('/api/distributed/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, shots, seed })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setDistResult(data);
-        fetchCluster();
-        setStatusMsg('Distributed execution completed with 95% confidence bounds');
-      } else {
-        alert(data.message || 'Distributed execution error');
-      }
-    } catch (e: any) {
-      alert(e.message);
+      const data = await postJson('/api/distributed/run', { code, shots, seed });
+      setDistResult(data);
+      fetchCluster();
+      setStatusMsg('Distributed execution completed with 95% confidence bounds');
+    } catch (error) {
+      reportError(error);
     } finally {
       setLoading(false);
     }
@@ -170,17 +152,13 @@ export default function App() {
 
   const handleVerify = async (type: string) => {
     setLoading(true);
+    setErrorMsg(null);
     try {
-      const res = await fetch('/api/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type })
-      });
-      const data = await res.json();
+      const data = await postJson('/api/verify', { type });
       if (type === 'metamorphic') setMetaResults(data.results);
       if (type === 'fault_injection') setFaultResults(data);
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error) {
+      reportError(error);
     } finally {
       setLoading(false);
     }
@@ -188,26 +166,20 @@ export default function App() {
 
   const validateNoise = async (channel: string, param: number) => {
     try {
-      const res = await fetch('/api/cptp/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel, param })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCptpResult(data.validation);
-      }
-    } catch (e) {}
+      const data = await postJson('/api/cptp/validate', { channel, param });
+      setCptpResult(data.validation);
+    } catch (error) {
+      reportError(error);
+    }
   };
 
   const runBenchmarks = async () => {
     setLoading(true);
+    setErrorMsg(null);
     try {
-      const res = await fetch('/api/benchmarks');
-      const data = await res.json();
-      setBenchResults(data);
-    } catch (e: any) {
-      alert(e.message);
+      setBenchResults(await apiRequest('/api/benchmarks'));
+    } catch (error) {
+      reportError(error);
     } finally {
       setLoading(false);
     }
@@ -238,7 +210,7 @@ export default function App() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: '#94a3b8' }}>
             <Server size={14} color="#06b6d4" />
-            <span>Active Workers: <strong style={{ color: '#38bdf8' }}>{clusterInfo?.workers?.length || 4}</strong></span>
+            <span>Active Workers: <strong style={{ color: '#38bdf8' }}>{clusterInfo?.workers?.length ?? 'Unavailable'}</strong></span>
           </div>
         </div>
       </header>
@@ -284,6 +256,11 @@ export default function App() {
 
       {/* Main Content Area */}
       <main style={{ flex: 1, padding: '1.5rem', maxWidth: '1600px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+        {errorMsg && (
+          <div role="alert" style={{ marginBottom: '1rem', padding: '0.75rem 1rem', border: '1px solid #ef4444', borderRadius: '6px', backgroundColor: 'rgba(127, 29, 29, 0.3)', color: '#fecaca' }}>
+            {errorMsg}
+          </div>
+        )}
         {/* TAB 1: CIRCUIT STUDIO */}
         {activeTab === 'studio' && (
           <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '1.5rem' }}>

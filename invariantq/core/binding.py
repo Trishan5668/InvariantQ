@@ -533,6 +533,10 @@ class NativeStabilizer:
 
 
 class NativeMPS:
+    # This binding owns a C++ tensor-network state, not a statevector.
+    implementation = "native-cpp-mps"
+    is_genuine_mps = True
+
     def __init__(self, num_qubits: int, max_bond_dim: int = 64, cutoff: float = 1e-12):
         self.num_qubits = num_qubits
         self.max_bond_dim = max_bond_dim
@@ -734,21 +738,588 @@ if not HAS_NATIVE_CORE:
             if self.measure(target, 0.0) == 1:
                 self.apply_1q_unitary(target, np.array([[0, 1], [1, 0]], dtype=np.complex128))
 
-    class NativeMPS(NativeStateVector):
-        def __init__(self, num_qubits, max_bond_dim=64, cutoff=1e-12):
-            self.max_bond_dim, self.cutoff = max_bond_dim, cutoff
-            super().__init__(num_qubits)
-        def entanglement_entropy(self, bond_idx): return self.von_neumann_entropy(list(range(bond_idx + 1)))
-        def to_statevector(self): return self.get_amplitudes()
+    class NativeMPS:
+        """A portable NumPy matrix-product-state engine.
 
-    class NativeStabilizer(NativeStateVector):
-        def h(self, a): self.apply_1q(a, np.array([[1, 1], [1, -1]], dtype=np.complex128) / np.sqrt(2))
-        def s(self, a): self.apply_1q(a, np.diag([1, 1j]))
-        def sdg(self, a): self.apply_1q(a, np.diag([1, -1j]))
-        def x(self, a): self.apply_1q(a, np.array([[0, 1], [1, 0]], dtype=np.complex128))
-        def y(self, a): self.apply_1q(a, np.array([[0, -1j], [1j, 0]], dtype=np.complex128))
-        def z(self, a): self.apply_1q(a, np.diag([1, -1]))
-        def cnot(self, a, b): self.apply_2q(a, b, np.array([[1,0,0,0],[0,1,0,0],[0,0,0,1],[0,0,1,0]], dtype=np.complex128))
-        def cz(self, a, b): self.apply_2q(a, b, np.diag([1,1,1,-1]))
-        def swap(self, a, b): self.apply_2q(a, b, np.array([[1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]], dtype=np.complex128))
-        def to_string(self): return "python-statevector fallback"
+        The state is a chain of rank-three tensors with layout ``(Dl, 2,
+        Dr)``.  It is intentionally independent of ``NativeStateVector``:
+        dense statevectors are only constructed by the explicitly guarded
+        ``to_statevector`` diagnostic export for small differential tests.
+
+        Site ``i`` is canonical little-endian qubit ``i``.  Therefore
+        ``apply_2q(q0, q1, U)`` uses a matrix whose local row/column index is
+        ``2 * bit(q0) + bit(q1)``, matching the portable statevector binding.
+        """
+
+        implementation = "python-mps"
+        is_genuine_mps = True
+        supports_dense_statevector_export = True
+        MAX_STATEVECTOR_EXPORT_QUBITS = 20
+        _SWAP = np.array(
+            [[1, 0, 0, 0],
+             [0, 0, 1, 0],
+             [0, 1, 0, 0],
+             [0, 0, 0, 1]],
+            dtype=np.complex128,
+        )
+
+        def __init__(self, num_qubits: int, max_bond_dim: int = 64, cutoff: float = 1e-12):
+            if not isinstance(num_qubits, (int, np.integer)) or num_qubits < 1:
+                raise ValueError("MPS requires at least one qubit")
+            if not isinstance(max_bond_dim, (int, np.integer)) or max_bond_dim < 1:
+                raise ValueError("max_bond_dim must be a positive integer")
+            if not np.isfinite(cutoff) or cutoff < 0:
+                raise ValueError("cutoff must be a finite non-negative number")
+            self.num_qubits = int(num_qubits)
+            self.max_bond_dim = int(max_bond_dim)
+            self.cutoff = float(cutoff)
+            self.reset()
+
+        def reset(self):
+            """Reset to |0...0> without allocating a dense vector."""
+            self.tensors = []
+            for _ in range(self.num_qubits):
+                tensor = np.zeros((1, 2, 1), dtype=np.complex128)
+                tensor[0, 0, 0] = 1.0
+                self.tensors.append(tensor)
+            self.discarded_weight = 0.0
+            self.last_discarded_weight = 0.0
+            self.truncation_events = 0
+            self._max_observed_bond_dimension = 1
+
+        @property
+        def site_tensors(self):
+            """A read-only view of the actual rank-three site tensors."""
+            views = []
+            for tensor in self.tensors:
+                view = tensor.view()
+                view.flags.writeable = False
+                views.append(view)
+            return tuple(views)
+
+        @property
+        def bond_dimensions(self):
+            """One internal dimension for every cut between adjacent sites."""
+            return tuple(int(tensor.shape[2]) for tensor in self.tensors[:-1])
+
+        @property
+        def max_observed_bond_dimension(self) -> int:
+            return self._max_observed_bond_dimension
+
+        @property
+        def memory_bytes(self) -> int:
+            """Bytes currently held by the MPS site tensors."""
+            return int(sum(tensor.nbytes for tensor in self.tensors))
+
+        @property
+        def is_approximate(self) -> bool:
+            return bool(self.discarded_weight > 0.0)
+
+        def get_bond_dimensions(self):
+            return list(self.bond_dimensions)
+
+        def get_diagnostics(self) -> dict:
+            """Expose real representation and approximation information."""
+            return {
+                "implementation": self.implementation,
+                "is_genuine_mps": self.is_genuine_mps,
+                "representation": "rank-3 site tensors (Dl, 2, Dr)",
+                "num_qubits": self.num_qubits,
+                "bond_dimensions": list(self.bond_dimensions),
+                "max_bond_dimension": self.max_bond_dim,
+                "max_observed_bond_dimension": self.max_observed_bond_dimension,
+                "cutoff": self.cutoff,
+                "truncation_events": self.truncation_events,
+                "discarded_weight": float(self.discarded_weight),
+                "last_discarded_weight": float(self.last_discarded_weight),
+                "exact": not self.is_approximate,
+                "tensor_memory_bytes": self.memory_bytes,
+                "dense_statevector_allocated": False,
+                "statevector_export_limit_qubits": self.MAX_STATEVECTOR_EXPORT_QUBITS,
+            }
+
+        def validate(self, atol: float = 1e-10) -> bool:
+            """Validate boundaries, bond shapes, finiteness, and normalization."""
+            if len(self.tensors) != self.num_qubits:
+                return False
+            previous_right = 1
+            for index, tensor in enumerate(self.tensors):
+                if tensor.ndim != 3 or tensor.shape[1] != 2:
+                    return False
+                if tensor.shape[0] != previous_right or not np.isfinite(tensor).all():
+                    return False
+                previous_right = tensor.shape[2]
+                if index < self.num_qubits - 1 and previous_right > self.max_bond_dim:
+                    return False
+            if previous_right != 1:
+                return False
+            return bool(np.isclose(self._state_norm(), 1.0, atol=atol, rtol=atol))
+
+        @staticmethod
+        def _validate_unitary(matrix: np.ndarray, arity: int) -> np.ndarray:
+            matrix = np.asarray(matrix, dtype=np.complex128)
+            dimension = 1 << arity
+            if matrix.shape != (dimension, dimension):
+                raise ValueError(f"{arity}-qubit gate matrix must have shape ({dimension}, {dimension})")
+            if not np.isfinite(matrix).all():
+                raise ValueError("gate matrix must contain only finite values")
+            if not np.allclose(
+                matrix.conj().T @ matrix,
+                np.eye(dimension, dtype=np.complex128),
+                atol=1e-10,
+                rtol=1e-10,
+            ):
+                raise ValueError("MPS backend accepts only unitary gate matrices")
+            return matrix
+
+        def _check_qubit(self, target: int):
+            if not isinstance(target, (int, np.integer)) or not 0 <= int(target) < self.num_qubits:
+                raise ValueError(f"qubit index {target!r} is out of range")
+
+        def apply_1q(self, target: int, matrix: np.ndarray):
+            self._check_qubit(target)
+            matrix = self._validate_unitary(matrix, 1)
+            target = int(target)
+            self.tensors[target] = np.einsum(
+                "oi,lir->lor", matrix, self.tensors[target], optimize=True
+            )
+
+        def _apply_2q_adjacent(self, left_site: int, matrix: np.ndarray):
+            """Apply a local two-site gate, then split with a truncated SVD."""
+            norm_before = self._state_norm()
+            left = self.tensors[left_site]
+            right = self.tensors[left_site + 1]
+            dl, _, middle = left.shape
+            right_middle, _, dr = right.shape
+            if middle != right_middle:
+                raise RuntimeError("inconsistent adjacent MPS bond dimensions")
+
+            # theta[l, a, b, r] stores the two physical indices a and b.
+            theta = np.einsum("lar,rbs->labs", left, right, optimize=True)
+            unitary = matrix.reshape(2, 2, 2, 2)
+            theta = np.einsum("ABab,labr->lABr", unitary, theta, optimize=True)
+            unfolded = theta.reshape(dl * 2, 2 * dr)
+            try:
+                u, singular_values, vh = np.linalg.svd(unfolded, full_matrices=False)
+            except np.linalg.LinAlgError as exc:
+                raise RuntimeError("MPS two-site SVD did not converge") from exc
+
+            total_weight = float(np.sum(np.square(singular_values)))
+            if not np.isfinite(total_weight) or total_weight <= 0.0:
+                raise RuntimeError("MPS state became zero or non-finite during a two-site update")
+
+            # ``cutoff`` is an absolute singular-value threshold.  The machine
+            # floor avoids retaining artificial bonds when cutoff=0.
+            numerical_floor = np.finfo(np.float64).eps * max(unfolded.shape) * singular_values[0]
+            by_cutoff = int(np.count_nonzero(singular_values > max(self.cutoff, numerical_floor)))
+            keep = max(1, min(self.max_bond_dim, by_cutoff, len(singular_values)))
+            kept_weight = float(np.sum(np.square(singular_values[:keep])))
+            discarded = max(0.0, total_weight - kept_weight)
+            # Do not rescale an exact SVD.  A local tensor is not necessarily
+            # in a canonical gauge, so its Frobenius norm is not in general
+            # the global state norm.  Rescaling it on every exact gate would
+            # silently corrupt amplitudes after non-adjacent SWAP paths.
+            material_truncation = (discarded / total_weight) > 1e-15
+            retained_s = singular_values[:keep]
+            self.tensors[left_site] = u[:, :keep].reshape(dl, 2, keep)
+            self.tensors[left_site + 1] = (retained_s[:, None] * vh[:keep, :]).reshape(keep, 2, dr)
+            self._max_observed_bond_dimension = max(self._max_observed_bond_dimension, keep)
+
+            self.last_discarded_weight = 0.0
+            if material_truncation:
+                norm_after = self._state_norm()
+                if not np.isfinite(norm_after) or norm_after <= 0.0:
+                    raise RuntimeError("MPS truncation retained a zero-norm state")
+                # Measure error in the represented global norm rather than
+                # treating a gauge-dependent local SVD norm as an error bound.
+                self.last_discarded_weight = max(0.0, (norm_before - norm_after) / norm_before)
+                self.discarded_weight += self.last_discarded_weight
+                self.truncation_events += 1
+                # Return to a normalized pure-state representation.  The
+                # discarded norm remains available as an explicit diagnostic.
+                self.tensors[left_site + 1] /= np.sqrt(norm_after)
+
+        def apply_2q(self, q0: int, q1: int, matrix: np.ndarray):
+            """Apply any two-qubit unitary through an explicit reversible SWAP path."""
+            self._check_qubit(q0)
+            self._check_qubit(q1)
+            if int(q0) == int(q1):
+                raise ValueError("two-qubit gate targets must be distinct")
+            matrix = self._validate_unitary(matrix, 2)
+            q0, q1 = int(q0), int(q1)
+
+            if q0 + 1 == q1:
+                self._apply_2q_adjacent(q0, matrix)
+                return
+            if q1 + 1 == q0:
+                # Physical site order is (q1, q0), but the matrix was supplied
+                # in explicit argument order (q0, q1).
+                self._apply_2q_adjacent(q1, self._SWAP @ matrix @ self._SWAP)
+                return
+
+            if q0 < q1:
+                # Move logical q1 left to q0 + 1, act, then restore ordering.
+                for site in range(q1 - 1, q0, -1):
+                    self._apply_2q_adjacent(site, self._SWAP)
+                self._apply_2q_adjacent(q0, matrix)
+                for site in range(q0 + 1, q1):
+                    self._apply_2q_adjacent(site, self._SWAP)
+            else:
+                # Move logical q0 right to q1 + 1.  At the local gate the
+                # physical ordering is reversed, hence SWAP U SWAP.
+                for site in range(q0 - 1, q1, -1):
+                    self._apply_2q_adjacent(site, self._SWAP)
+                self._apply_2q_adjacent(q1, self._SWAP @ matrix @ self._SWAP)
+                for site in range(q1 + 1, q0):
+                    self._apply_2q_adjacent(site, self._SWAP)
+
+        def _left_gram(self, final_site: int) -> np.ndarray:
+            """Gram matrix for the prefix ending at ``final_site``."""
+            gram = np.ones((1, 1), dtype=np.complex128)
+            for tensor in self.tensors[: final_site + 1]:
+                gram = np.einsum("ab,asr,bst->rt", gram, tensor.conj(), tensor, optimize=True)
+            return gram
+
+        def _right_gram(self, first_site: int) -> np.ndarray:
+            """Gram matrix for the suffix starting at ``first_site``."""
+            gram = np.ones((1, 1), dtype=np.complex128)
+            for tensor in reversed(self.tensors[first_site:]):
+                gram = np.einsum("asr,rt,bst->ab", tensor, gram, tensor.conj(), optimize=True)
+            return gram
+
+        def _right_grams(self):
+            """Suffix Gram matrices at every virtual bond for direct sampling."""
+            grams = [None] * (self.num_qubits + 1)
+            grams[self.num_qubits] = np.ones((1, 1), dtype=np.complex128)
+            for site in range(self.num_qubits - 1, -1, -1):
+                tensor = self.tensors[site]
+                grams[site] = np.einsum(
+                    "asr,rt,bst->ab", tensor, grams[site + 1], tensor.conj(), optimize=True
+                )
+            return grams
+
+        def _state_norm(self) -> float:
+            norm = self._left_gram(self.num_qubits - 1)[0, 0]
+            return float(np.real_if_close(norm).real)
+
+        def measure_probability(self, target: int, outcome: int) -> float:
+            self._check_qubit(target)
+            if outcome not in (0, 1):
+                raise ValueError("measurement outcome must be 0 or 1")
+            target = int(target)
+            left = np.ones((1, 1), dtype=np.complex128) if target == 0 else self._left_gram(target - 1)
+            right = self._right_gram(target + 1)
+            site = self.tensors[target][:, outcome, :]
+            raw = np.einsum("ab,ar,bt,rt->", left, site.conj(), site, right, optimize=True)
+            total = self._state_norm()
+            if total <= 0.0 or not np.isfinite(total):
+                raise RuntimeError("MPS state has invalid norm")
+            probability = float(np.real_if_close(raw).real / total)
+            if probability < -1e-10 or probability > 1.0 + 1e-10:
+                raise RuntimeError("MPS measurement produced an invalid probability")
+            return float(np.clip(probability, 0.0, 1.0))
+
+        def measure(self, target: int, rand_val: float) -> int:
+            """Project a qubit in-place using local tensor contractions only."""
+            self._check_qubit(target)
+            if not np.isfinite(rand_val) or not 0.0 <= float(rand_val) < 1.0:
+                raise ValueError("random value must be in [0, 1)")
+            target = int(target)
+            old_norm = self._state_norm()
+            p0 = self.measure_probability(target, 0)
+            outcome = 0 if float(rand_val) < p0 else 1
+            selected_probability = p0 if outcome == 0 else 1.0 - p0
+            selected_weight = selected_probability * old_norm
+            if selected_weight <= 1e-15:
+                raise RuntimeError("measurement selected a zero-probability outcome")
+            tensor = self.tensors[target].copy()
+            tensor[:, 1 - outcome, :] = 0.0
+            tensor[:, outcome, :] /= np.sqrt(selected_weight)
+            self.tensors[target] = tensor
+            return outcome
+
+        def reset_qubit(self, target: int, rand_val: float = 0.0):
+            if self.measure(target, rand_val) == 1:
+                self.apply_1q(target, np.array([[0, 1], [1, 0]], dtype=np.complex128))
+
+        def _sample_one(self, rng: np.random.Generator, right_grams=None) -> str:
+            """Sample all sites without mutation or dense reconstruction."""
+            if right_grams is None:
+                right_grams = self._right_grams()
+            left = np.ones((1, 1), dtype=np.complex128)
+            bits_little_endian = []
+            for site_index, tensor in enumerate(self.tensors):
+                right = right_grams[site_index + 1]
+                raw_probabilities = []
+                for outcome in (0, 1):
+                    site = tensor[:, outcome, :]
+                    raw = np.einsum("ab,ar,bt,rt->", left, site.conj(), site, right, optimize=True)
+                    raw_probabilities.append(max(0.0, float(np.real_if_close(raw).real)))
+                total = raw_probabilities[0] + raw_probabilities[1]
+                if not np.isfinite(total) or total <= 0.0:
+                    raise RuntimeError("MPS sampling encountered an invalid conditional norm")
+                p0 = raw_probabilities[0] / total
+                outcome = 0 if rng.random() < p0 else 1
+                selected = raw_probabilities[outcome]
+                if selected <= 0.0:
+                    outcome = 1 - outcome
+                    selected = raw_probabilities[outcome]
+                site = tensor[:, outcome, :]
+                left = np.einsum("ab,ar,bt->rt", left, site.conj(), site, optimize=True) / selected
+                bits_little_endian.append(str(outcome))
+            # Public bitstrings follow normal integer formatting q[n-1]...q[0].
+            return "".join(reversed(bits_little_endian))
+
+        def sample_bitstrings(self, num_shots: int, seed: int = 42):
+            if not isinstance(num_shots, (int, np.integer)) or num_shots < 0:
+                raise ValueError("num_shots must be a non-negative integer")
+            rng = np.random.default_rng(seed)
+            # The MPS does not mutate while sampling, so suffix environments
+            # can be shared by every shot.  This avoids an O(shots * n)
+            # rebuild of identical environments without using a statevector.
+            right_grams = self._right_grams()
+            return [self._sample_one(rng, right_grams) for _ in range(int(num_shots))]
+
+        def sample(self, num_shots: int, seed: int = 42) -> np.ndarray:
+            """Statevector-compatible samples without allocating a vector."""
+            bitstrings = self.sample_bitstrings(num_shots, seed)
+            if self.num_qubits <= 63:
+                return np.asarray([int(bits, 2) for bits in bitstrings], dtype=np.uint64)
+            return np.asarray(bitstrings, dtype=object)
+
+        def entanglement_entropy(self, bond_idx: int) -> float:
+            """Entropy across one cut using only bond-dimension Gram matrices."""
+            if self.num_qubits < 2:
+                return 0.0
+            if not isinstance(bond_idx, (int, np.integer)) or not 0 <= int(bond_idx) < self.num_qubits - 1:
+                raise ValueError("bond index must identify a cut between adjacent sites")
+            left = self._left_gram(int(bond_idx))
+            right = self._right_gram(int(bond_idx) + 1)
+            left = (left + left.conj().T) / 2.0
+            right = (right + right.conj().T) / 2.0
+            values, vectors = np.linalg.eigh(left)
+            values = np.clip(values.real, 0.0, None)
+            sqrt_left = (vectors * np.sqrt(values)) @ vectors.conj().T
+            spectrum = np.linalg.eigvalsh(sqrt_left @ right @ sqrt_left)
+            spectrum = np.clip(spectrum.real, 0.0, None)
+            trace = float(np.sum(spectrum))
+            if trace <= 0.0:
+                raise RuntimeError("MPS state has zero norm while calculating entropy")
+            spectrum /= trace
+            spectrum = spectrum[spectrum > 1e-15]
+            return float(-np.sum(spectrum * np.log2(spectrum)))
+
+        def to_statevector(self) -> np.ndarray:
+            """Export a small MPS for differential tests, in little-endian order."""
+            if self.num_qubits > self.MAX_STATEVECTOR_EXPORT_QUBITS:
+                raise ValueError(
+                    f"dense statevector export is limited to {self.MAX_STATEVECTOR_EXPORT_QUBITS} qubits; "
+                    "use sample_bitstrings() or MPS diagnostics for scalable execution"
+                )
+            contracted = self.tensors[0][0, :, :]
+            for tensor in self.tensors[1:]:
+                contracted = np.tensordot(contracted, tensor, axes=([-1], [0]))
+            state_tensor = np.asarray(contracted[..., 0], dtype=np.complex128)
+            return state_tensor.reshape(-1, order="F").copy()
+
+        # Small-system compatibility helpers.  No dense representation is
+        # cached or used for gate application, measurement, or sampling.
+        def get_amplitudes(self) -> np.ndarray:
+            return self.to_statevector()
+
+        def get_probabilities(self) -> np.ndarray:
+            statevector = self.to_statevector()
+            return np.abs(statevector) ** 2
+
+    class NativeStabilizer:
+        """Portable Aaronson--Gottesman binary tableau simulator.
+
+        Rows ``0..n-1`` are destabilizers and rows ``n..2n-1`` are
+        stabilizers.  This stores O(n^2) bits and never materializes a state
+        vector; it deliberately exposes only Clifford operations.
+        """
+        implementation = "python-binary-tableau"
+        is_genuine_tableau = True
+
+        def __init__(self, num_qubits: int):
+            if num_qubits < 0:
+                raise ValueError("num_qubits must be non-negative")
+            self.num_qubits = num_qubits
+            self.reset()
+
+        def reset(self):
+            n = self.num_qubits
+            self._x = np.zeros((2 * n, n), dtype=np.uint8)
+            self._z = np.zeros((2 * n, n), dtype=np.uint8)
+            self._r = np.zeros(2 * n, dtype=np.uint8)
+            if n:
+                idx = np.arange(n)
+                self._x[idx, idx] = 1
+                self._z[n + idx, idx] = 1
+
+        def copy(self):
+            other = type(self).__new__(type(self))
+            other.num_qubits = self.num_qubits
+            other._x, other._z, other._r = self._x.copy(), self._z.copy(), self._r.copy()
+            return other
+
+        @property
+        def tableau_memory_bytes(self) -> int:
+            return int(self._x.nbytes + self._z.nbytes + self._r.nbytes)
+
+        def _check_qubit(self, q: int):
+            if not isinstance(q, (int, np.integer)) or q < 0 or q >= self.num_qubits:
+                raise IndexError(f"qubit index {q!r} is outside [0, {self.num_qubits})")
+
+        @staticmethod
+        def _g(x1: int, z1: int, x2: int, z2: int) -> int:
+            if not x1 and not z1:
+                return 0
+            if x1 and z1:  # Y
+                return 1 if x2 and not z2 else -1 if not x2 and z2 else 0
+            if x1:  # X
+                return 1 if not x2 and z2 else -1 if x2 and z2 else 0
+            # Z
+            return 1 if x2 and z2 else -1 if x2 and not z2 else 0
+
+        def _row_mult(self, target: int, source: int):
+            total = 2 * int(self._r[target]) + 2 * int(self._r[source])
+            for q in range(self.num_qubits):
+                total += self._g(int(self._x[target, q]), int(self._z[target, q]),
+                                 int(self._x[source, q]), int(self._z[source, q]))
+            total %= 4
+            if total not in (0, 2):
+                raise RuntimeError("invalid non-commuting tableau row multiplication")
+            self._r[target] = total // 2
+            self._x[target] ^= self._x[source]
+            self._z[target] ^= self._z[source]
+
+        def h(self, a: int):
+            self._check_qubit(a)
+            self._r ^= self._x[:, a] & self._z[:, a]
+            self._x[:, a], self._z[:, a] = self._z[:, a].copy(), self._x[:, a].copy()
+
+        def s(self, a: int):
+            self._check_qubit(a)
+            self._r ^= self._x[:, a] & self._z[:, a]
+            self._z[:, a] ^= self._x[:, a]
+
+        def sdg(self, a: int):
+            self.s(a)
+            self.s(a)
+            self.s(a)
+
+        def cnot(self, a: int, b: int):
+            self._check_qubit(a)
+            self._check_qubit(b)
+            if a == b:
+                raise ValueError("CNOT control and target must differ")
+            xa, za = self._x[:, a].copy(), self._z[:, a].copy()
+            xb, zb = self._x[:, b].copy(), self._z[:, b].copy()
+            self._r ^= xa & zb & (xb ^ za ^ 1)
+            self._x[:, b] ^= xa
+            self._z[:, a] ^= zb
+
+        def cz(self, a: int, b: int):
+            self._check_qubit(a)
+            self._check_qubit(b)
+            if a == b:
+                raise ValueError("CZ operands must differ")
+            self.h(b)
+            self.cnot(a, b)
+            self.h(b)
+
+        def swap(self, a: int, b: int):
+            self._check_qubit(a)
+            self._check_qubit(b)
+            if a == b:
+                raise ValueError("SWAP operands must differ")
+            self.cnot(a, b)
+            self.cnot(b, a)
+            self.cnot(a, b)
+
+        def x_gate(self, a: int):
+            self.h(a)
+            self.z_gate(a)
+            self.h(a)
+
+        def z_gate(self, a: int):
+            self._check_qubit(a)
+            self._r ^= self._x[:, a]
+
+        def y_gate(self, a: int):
+            self.z_gate(a)
+            self.x_gate(a)
+
+        # Preserve the native wrapper method names.
+        x = x_gate
+        y = y_gate
+        z = z_gate
+
+        def measure(self, a: int, rand_val: float) -> int:
+            self._check_qubit(a)
+            if not 0.0 <= rand_val < 1.0:
+                raise ValueError("random value must be in [0, 1)")
+            n = self.num_qubits
+            pivots = np.flatnonzero(self._x[n:, a])
+            if pivots.size:
+                p = n + int(pivots[0])
+                for row in range(2 * n):
+                    if row != p and self._x[row, a]:
+                        self._row_mult(row, p)
+                self._x[p - n] = self._x[p]
+                self._z[p - n] = self._z[p]
+                self._r[p - n] = self._r[p]
+                self._x[p].fill(0)
+                self._z[p].fill(0)
+                self._z[p, a] = 1
+                outcome = 0 if rand_val < 0.5 else 1
+                self._r[p] = outcome
+                return outcome
+
+            # Deterministic measurement: product of stabilizers selected by
+            # destabilizers that anticommute with Z_a.
+            acc_x = np.zeros(n, dtype=np.uint8)
+            acc_z = np.zeros(n, dtype=np.uint8)
+            acc_r = 0
+            for i in range(n):
+                if not self._x[i, a]:
+                    continue
+                src = n + i
+                total = 2 * acc_r + 2 * int(self._r[src])
+                for q in range(n):
+                    total += self._g(int(acc_x[q]), int(acc_z[q]), int(self._x[src, q]), int(self._z[src, q]))
+                total %= 4
+                if total not in (0, 2):
+                    raise RuntimeError("invalid deterministic measurement tableau product")
+                acc_r = total // 2
+                acc_x ^= self._x[src]
+                acc_z ^= self._z[src]
+            return int(acc_r)
+
+        def reset_qubit(self, a: int, rand_val: float = 0.0):
+            if self.measure(a, rand_val):
+                self.x_gate(a)
+
+        def sample(self, num_shots: int, seed: int = 42) -> np.ndarray:
+            if num_shots < 0:
+                raise ValueError("num_shots must be non-negative")
+            rng = np.random.default_rng(seed)
+            # Python integers preserve outcomes wider than 64 qubits.
+            samples = np.empty(num_shots, dtype=object)
+            for shot in range(num_shots):
+                tableau = self.copy()
+                value = 0
+                for q in range(self.num_qubits):
+                    value |= tableau.measure(q, float(rng.random())) << q
+                samples[shot] = value
+            return samples
+
+        def to_string(self) -> str:
+            labels = ("I", "Z", "X", "Y")
+            rows = []
+            for row in range(self.num_qubits, 2 * self.num_qubits):
+                sign = "-" if self._r[row] else "+"
+                body = "".join(labels[int(self._x[row, q]) * 2 + int(self._z[row, q])] for q in range(self.num_qubits))
+                rows.append(sign + body)
+            return "Stabilizers:\n" + "\n".join(rows)

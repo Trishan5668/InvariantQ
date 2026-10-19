@@ -6,6 +6,7 @@ distributed job scheduling, CPTP validation, and performance benchmarks.
 
 from __future__ import annotations
 import json
+import logging
 import time
 import os
 import sys
@@ -29,6 +30,8 @@ from ..verification.metamorphic import MetamorphicTester
 from ..verification.fault_injection import FaultInjectionTester
 from ..benchmarks.runner import BenchmarkRunner
 
+logger = logging.getLogger(__name__)
+
 class InvariantQServerHandler(SimpleHTTPRequestHandler):
     scheduler = DistributedScheduler(num_workers=4)
     runner = BenchmarkRunner()
@@ -44,79 +47,87 @@ class InvariantQServerHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        if self.path == "/api/health":
-            self._send_json({"status": "ok", "platform": "InvariantQ", "version": "1.0.0"})
-            return
+        try:
+            if self.path == "/api/health":
+                self._send_json({"status": "ok", "platform": "InvariantQ",
+                                 "version": "1.0.0", "workers": len(self.scheduler.workers)})
+                return
+            if self.path == "/api/cluster":
+                self._send_json({"workers": [self._worker_info(w_id, worker)
+                    for w_id, worker in self.scheduler.workers.items()]})
+                return
+            if self.path == "/api/benchmarks":
+                scaling = self.runner.benchmark_qubit_scaling([6, 8, 10, 12])
+                fusion = self.runner.benchmark_gate_fusion_speedup(num_qubits=12, depth=16)
+                self._send_json({"scaling": scaling, "fusion": fusion})
+                return
 
-        if self.path == "/api/cluster":
-            workers_info = []
-            for w_id, w in self.scheduler.workers.items():
-                workers_info.append({
-                    "id": w_id,
-                    "host": w.host,
-                    "status": w.status,
-                    "tasks_completed": w.tasks_completed,
-                    "cores": w.cores,
-                    "last_heartbeat": w.last_heartbeat
-                })
-            self._send_json({"workers": workers_info})
-            return
-
-        if self.path == "/api/benchmarks":
-            scaling = self.runner.benchmark_qubit_scaling([6, 8, 10, 12])
-            fusion = self.runner.benchmark_gate_fusion_speedup(num_qubits=12, depth=16)
-            self._send_json({"scaling": scaling, "fusion": fusion})
-            return
-
-        # Serve static frontend if directory exists
-        web_dist = Path(__file__).parent.parent.parent / "web" / "dist"
-        if web_dist.exists() and not self.path.startswith("/api"):
-            requested_file = web_dist / (self.path.lstrip("/") or "index.html")
-            if requested_file.exists() and requested_file.is_file():
+            web_dist = Path(__file__).parent.parent.parent / "web" / "dist"
+            if web_dist.exists() and not self.path.startswith("/api"):
+                requested_file = web_dist / (self.path.lstrip("/") or "index.html")
                 self.directory = str(web_dist)
+                if not requested_file.exists() or not requested_file.is_file():
+                    self.path = "/index.html"
                 return super().do_GET()
-            else:
-                # SPA fallback
-                self.directory = str(web_dist)
-                self.path = "/index.html"
-                return super().do_GET()
-
-        super().do_GET()
+            self._send_json({"status": "error", "message": f"Endpoint {self.path} not found"}, code=404)
+        except Exception:
+            logger.exception("GET request failed: %s", self.path)
+            self._send_json({"status": "error", "message": "Internal server error"}, code=500)
 
     def do_POST(self):
-        content_len = int(self.headers.get("Content-Length", 0))
-        post_data = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
         try:
+            content_len = int(self.headers.get("Content-Length", 0))
+            if content_len < 0 or content_len > 10 * 1024 * 1024:
+                self._send_json({"status": "error", "message": "Request body is too large"}, code=413)
+                return
+            post_data = self.rfile.read(content_len).decode("utf-8") if content_len else ""
             body = json.loads(post_data) if post_data else {}
-        except Exception:
-            body = {}
+            if not isinstance(body, dict):
+                raise ValueError("JSON request body must be an object")
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            self._send_json({"status": "error", "message": f"Invalid JSON request: {exc}"}, code=400)
+            return
 
-        if self.path == "/api/compile":
-            self._handle_compile(body)
-        elif self.path == "/api/run":
-            self._handle_run(body)
-        elif self.path == "/api/distributed/run":
-            self._handle_distributed_run(body)
-        elif self.path == "/api/verify":
-            self._handle_verify(body)
-        elif self.path == "/api/cptp/validate":
-            self._handle_cptp_validate(body)
-        else:
-            self.send_response(404)
-            self._send_json({"error": f"Endpoint {self.path} not found"})
+        try:
+            handlers = {
+                "/api/compile": self._handle_compile,
+                "/api/run": self._handle_run,
+                "/api/distributed/run": self._handle_distributed_run,
+                "/api/verify": self._handle_verify,
+                "/api/cptp/validate": self._handle_cptp_validate,
+            }
+            handler = handlers.get(self.path)
+            if handler is None:
+                self._send_json({"status": "error", "message": f"Endpoint {self.path} not found"}, code=404)
+            else:
+                handler(body)
+        except Exception:
+            logger.exception("POST request failed: %s", self.path)
+            self._send_json({"status": "error", "message": "Internal server error"}, code=500)
+
+    @staticmethod
+    def _worker_info(worker_id: str, worker: Any) -> Dict[str, Any]:
+        return {"id": worker_id, "host": worker.host, "status": worker.status,
+                "tasks_completed": worker.tasks_completed, "cores": worker.cores,
+                "last_heartbeat": worker.last_heartbeat}
 
     def _send_json(self, data: Any, code: int = 200):
+        payload = json.dumps(data).encode("utf-8")
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode("utf-8"))
+        self.wfile.write(payload)
 
     def _handle_compile(self, body: Dict[str, Any]):
-        code = body.get("code", "qubit q[2]; h q[0]; cx q[0], q[1];")
-        opt_level = int(body.get("opt_level", 2))
-        topo_name = body.get("topology", "all_to_all")
-
         try:
+            code = body.get("code")
+            if not isinstance(code, str) or not code.strip():
+                raise ValueError("code must be a non-empty string")
+            opt_level = self._validated_int(body.get("opt_level", 2), "opt_level", minimum=0)
+            topo_name = body.get("topology", "all_to_all")
+            if topo_name not in {"all_to_all", "linear", "grid"}:
+                raise ValueError("topology must be one of: all_to_all, linear, grid")
             circ = parse_iq_lang(code)
             topo = None
             if topo_name == "linear":
@@ -144,12 +155,15 @@ class InvariantQServerHandler(SimpleHTTPRequestHandler):
             self._send_json({"status": "error", "message": str(e)}, code=400)
 
     def _handle_run(self, body: Dict[str, Any]):
-        code = body.get("code", "qubit q[2]; h q[0]; cx q[0], q[1];")
-        backend = body.get("backend", "adaptive")
-        shots = int(body.get("shots", 1024))
-        seed = int(body.get("seed", 42))
-
         try:
+            code = body.get("code")
+            if not isinstance(code, str) or not code.strip():
+                raise ValueError("code must be a non-empty string")
+            backend = body.get("backend", "adaptive")
+            if backend not in {"adaptive", "statevector", "density_matrix", "stabilizer", "tensor_network"}:
+                raise ValueError(f"unsupported backend: {backend}")
+            shots = self._validated_int(body.get("shots", 1024), "shots", minimum=1)
+            seed = self._validated_int(body.get("seed", 42), "seed", minimum=0)
             circ = parse_iq_lang(code)
             backend_map = {
                 "adaptive": AdaptivePlannerSimulator(),
@@ -184,11 +198,12 @@ class InvariantQServerHandler(SimpleHTTPRequestHandler):
             self._send_json({"status": "error", "message": str(e)}, code=400)
 
     def _handle_distributed_run(self, body: Dict[str, Any]):
-        code = body.get("code", "qubit q[2]; h q[0]; cx q[0], q[1];")
-        shots = int(body.get("shots", 2000))
-        seed = int(body.get("seed", 42))
-
         try:
+            code = body.get("code")
+            if not isinstance(code, str) or not code.strip():
+                raise ValueError("code must be a non-empty string")
+            shots = self._validated_int(body.get("shots", 2000), "shots", minimum=1)
+            seed = self._validated_int(body.get("seed", 42), "seed", minimum=0)
             circ = parse_iq_lang(code)
             job_id = f"job_{int(time.time() * 1000)}"
             dist_res = self.scheduler.execute_job(job_id, circ, total_shots=shots, master_seed=seed)
@@ -245,14 +260,21 @@ class InvariantQServerHandler(SimpleHTTPRequestHandler):
             self._send_json({"status": "error", "message": str(e)}, code=400)
 
     def _handle_cptp_validate(self, body: Dict[str, Any]):
-        ch_name = body.get("channel", "depolarizing")
-        param = float(body.get("param", 0.05))
         try:
+            ch_name = body.get("channel", "depolarizing")
+            param = float(body.get("param", 0.05))
             kraus = build_kraus_channel(ch_name, [param])
             res = validate_cptp(kraus)
             self._send_json({"status": "success", "channel": ch_name, "param": param, "validation": res})
         except Exception as e:
             self._send_json({"status": "error", "message": str(e)}, code=400)
+
+    @staticmethod
+    def _validated_int(value: Any, label: str, *, minimum: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            qualifier = "positive" if minimum else "non-negative"
+            raise ValueError(f"{label} must be a {qualifier} integer")
+        return value
 
 
 def start_server(host: str = "0.0.0.0", port: int = 8000):

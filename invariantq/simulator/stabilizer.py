@@ -33,10 +33,8 @@ class StabilizerSimulator(BaseSimulator):
         # Memory used: 2n * (2n+1) bytes for tableau
         mem_bytes = (2 * n) * (2 * n + 1)
 
-        # The portable fallback has no tableau; for circuits without explicit
-        # mid-circuit measurements, evolve once and sample its final state.
-        # This preserves sampling semantics while avoiding O(shots) dense-state
-        # evolution for large Clifford examples.
+        # Evolve once and clone the tableau for each terminal sample. This
+        # avoids replaying the gate sequence and never constructs amplitudes.
         if not HAS_NATIVE_CORE and not any(isinstance(op, MeasureOp) for op in circuit.ops):
             stab = NativeStabilizer(n)
             for op in circuit.ops:
@@ -64,8 +62,9 @@ class StabilizerSimulator(BaseSimulator):
                 counts=counts, probabilities=probs,
                 execution_time_ms=(time.perf_counter() - t0) * 1000.0,
                 backend_used="stabilizer", memory_used_bytes=mem_bytes, shots=shots,
-                metadata={"num_qubits": n, "tableau": "portable statevector fallback",
-                          "algorithm": "dense-statevector compatibility fallback",
+                metadata={"num_qubits": n, "tableau": stab.to_string(),
+                          "algorithm": getattr(stab, "implementation", "native-binary-tableau"),
+                          "tableau_memory_bytes": getattr(stab, "tableau_memory_bytes", mem_bytes),
                           "core": native_core_status()},
             )
 
@@ -151,6 +150,6 @@ class StabilizerSimulator(BaseSimulator):
             memory_used_bytes=mem_bytes,
             shots=shots,
             metadata={"num_qubits": n, "tableau": stab_repr,
-                      "algorithm": "binary-tableau" if HAS_NATIVE_CORE else "dense-statevector compatibility fallback",
+                      "algorithm": "native-binary-tableau" if HAS_NATIVE_CORE else getattr(NativeStabilizer, "implementation", "unknown"),
                       "core": native_core_status()}
         )
