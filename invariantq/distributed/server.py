@@ -29,6 +29,7 @@ from ..verification.differential import DifferentialTester
 from ..verification.metamorphic import MetamorphicTester
 from ..verification.fault_injection import FaultInjectionTester
 from ..benchmarks.runner import BenchmarkRunner
+from ..protocols import entanglement_explorer, quantum_teleportation, superdense_coding
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,9 @@ class InvariantQServerHandler(SimpleHTTPRequestHandler):
                 "/api/distributed/run": self._handle_distributed_run,
                 "/api/verify": self._handle_verify,
                 "/api/cptp/validate": self._handle_cptp_validate,
+                "/api/protocols/entanglement": self._handle_entanglement,
+                "/api/protocols/superdense": self._handle_superdense,
+                "/api/protocols/teleportation": self._handle_teleportation,
             }
             handler = handlers.get(self.path)
             if handler is None:
@@ -268,6 +272,38 @@ class InvariantQServerHandler(SimpleHTTPRequestHandler):
             self._send_json({"status": "success", "channel": ch_name, "param": param, "validation": res})
         except Exception as e:
             self._send_json({"status": "error", "message": str(e)}, code=400)
+
+    def _handle_entanglement(self, body: Dict[str, Any]):
+        try:
+            self._send_json({"status": "success", **entanglement_explorer(body.get("state", "bell"))})
+        except (TypeError, ValueError) as exc:
+            self._send_json({"status": "error", "message": str(exc)}, code=400)
+
+    def _handle_superdense(self, body: Dict[str, Any]):
+        try:
+            shots = self._validated_int(body.get("shots", 1), "shots", minimum=1)
+            seed = self._validated_int(body.get("seed", 42), "seed", minimum=0)
+            self._send_json({"status": "success", **superdense_coding(shots=shots, seed=seed)})
+        except (TypeError, ValueError) as exc:
+            self._send_json({"status": "error", "message": str(exc)}, code=400)
+
+    def _handle_teleportation(self, body: Dict[str, Any]):
+        try:
+            shots = self._validated_int(body.get("shots", 128), "shots", minimum=1)
+            seed = self._validated_int(body.get("seed", 42), "seed", minimum=0)
+            alpha_value = body.get("alpha", [1 / 2**0.5, 0.0])
+            beta_value = body.get("beta", [0.0, 1 / 2**0.5])
+            if not (
+                isinstance(alpha_value, list) and len(alpha_value) == 2
+                and isinstance(beta_value, list) and len(beta_value) == 2
+            ):
+                raise ValueError("alpha and beta must be [real, imaginary] pairs")
+            alpha = complex(float(alpha_value[0]), float(alpha_value[1]))
+            beta = complex(float(beta_value[0]), float(beta_value[1]))
+            result = quantum_teleportation(alpha=alpha, beta=beta, shots=shots, seed=seed)
+            self._send_json({"status": "success", **result})
+        except (TypeError, ValueError) as exc:
+            self._send_json({"status": "error", "message": str(exc)}, code=400)
 
     @staticmethod
     def _validated_int(value: Any, label: str, *, minimum: int) -> int:

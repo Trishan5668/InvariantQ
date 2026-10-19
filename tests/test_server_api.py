@@ -80,3 +80,32 @@ def test_compile_and_distributed_routes_return_real_results(api_server):
     assert status == 200
     assert distributed["status"] == "success"
     assert distributed["total_shots"] == 16
+
+
+def test_protocol_routes_return_mathematical_results(api_server):
+    status, _, entanglement = request(
+        api_server, "POST", "/api/protocols/entanglement", {"state": "bell"}
+    )
+    assert status == 200
+    assert entanglement["status"] == "success"
+    assert entanglement["von_neumann_entropy_bits"] == pytest.approx(1.0)
+
+    status, _, dense = request(
+        api_server, "POST", "/api/protocols/superdense", {"shots": 2, "seed": 3}
+    )
+    assert status == 200
+    assert all(item["correct"] for item in dense["messages"].values())
+
+    status, _, teleport = request(
+        api_server,
+        "POST",
+        "/api/protocols/teleportation",
+        {
+            "alpha": [2**-0.5, 0],
+            "beta": [0, 2**-0.5],
+            "shots": 4,
+            "seed": 3,
+        },
+    )
+    assert status == 200
+    assert teleport["verified"] is True

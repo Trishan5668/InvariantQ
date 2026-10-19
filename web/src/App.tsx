@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Cpu, Play, Layers, Activity, ShieldCheck, Zap,
   Server, RefreshCw, AlertTriangle, CheckCircle2,
-  Terminal, BarChart3, Database, Sliders, Box, GitBranch
+  Terminal, BarChart3, Database, Sliders, Box, GitBranch, Atom
 } from 'lucide-react';
 import { ApiError, apiRequest, postJson } from './api';
 
@@ -58,7 +58,7 @@ h q[2];`
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'studio' | 'visualizer' | 'noise' | 'cluster' | 'verify' | 'benchmarks'>('studio');
+  const [activeTab, setActiveTab] = useState<'studio' | 'visualizer' | 'noise' | 'cluster' | 'verify' | 'benchmarks' | 'protocols'>('studio');
   const [code, setCode] = useState<string>(PRESETS["Bell State (EPR)"]);
   const [backend, setBackend] = useState<string>('adaptive');
   const [optLevel, setOptLevel] = useState<number>(2);
@@ -77,6 +77,9 @@ export default function App() {
   const [cptpResult, setCptpResult] = useState<any>(null);
   const [noiseParam, setNoiseParam] = useState<number>(0.05);
   const [noiseChannel, setNoiseChannel] = useState<string>('depolarizing');
+  const [protocol, setProtocol] = useState<string>('entanglement');
+  const [protocolState, setProtocolState] = useState<string>('bell');
+  const [protocolResult, setProtocolResult] = useState<any>(null);
 
   const [loading, setLoading] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string>('Ready');
@@ -185,6 +188,28 @@ export default function App() {
     }
   };
 
+  const runProtocol = async () => {
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      let path = '/api/protocols/entanglement';
+      let body: Record<string, unknown> = { state: protocolState };
+      if (protocol === 'superdense') {
+        path = '/api/protocols/superdense';
+        body = { shots: 16, seed };
+      } else if (protocol === 'teleportation') {
+        path = '/api/protocols/teleportation';
+        body = { alpha: [1 / Math.sqrt(2), 0], beta: [0, 1 / Math.sqrt(2)], shots: 32, seed };
+      }
+      setProtocolResult(await postJson(path, body));
+      setStatusMsg('Protocol execution completed');
+    } catch (error) {
+      reportError(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
       {/* Top Header */}
@@ -223,7 +248,8 @@ export default function App() {
           { id: 'noise', label: 'Noise & CPTP Lab', icon: Sliders },
           { id: 'cluster', label: 'Distributed Cluster', icon: Server },
           { id: 'verify', label: 'Verification & Metamorphic', icon: ShieldCheck },
-          { id: 'benchmarks', label: 'Performance Benchmarks', icon: BarChart3 }
+          { id: 'benchmarks', label: 'Performance Benchmarks', icon: BarChart3 },
+          { id: 'protocols', label: 'Quantum Protocols', icon: Atom }
         ].map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -259,6 +285,42 @@ export default function App() {
         {errorMsg && (
           <div role="alert" style={{ marginBottom: '1rem', padding: '0.75rem 1rem', border: '1px solid #ef4444', borderRadius: '6px', backgroundColor: 'rgba(127, 29, 29, 0.3)', color: '#fecaca' }}>
             {errorMsg}
+          </div>
+        )}
+        {activeTab === 'protocols' && (
+          <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
+            <div style={{ backgroundColor: '#0b1120', border: '1px solid #1e293b', borderRadius: '8px', padding: '1.25rem' }}>
+              <h2 style={{ marginTop: 0, color: '#67e8f9' }}>Quantum Information Protocols</h2>
+              <p style={{ color: '#94a3b8' }}>
+                Execute the verified Python protocol service and inspect measured outcomes,
+                reduced states, entropy, or teleportation fidelity.
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '1rem' }}>
+                <select value={protocol} onChange={(e) => setProtocol(e.target.value)}
+                  style={{ backgroundColor: '#1e293b', color: '#f8fafc', border: '1px solid #334155', padding: '0.5rem' }}>
+                  <option value="entanglement">Entanglement Explorer</option>
+                  <option value="superdense">Superdense Coding</option>
+                  <option value="teleportation">Quantum Teleportation</option>
+                </select>
+                {protocol === 'entanglement' && (
+                  <select value={protocolState} onChange={(e) => setProtocolState(e.target.value)}
+                    style={{ backgroundColor: '#1e293b', color: '#f8fafc', border: '1px solid #334155', padding: '0.5rem' }}>
+                    <option value="product">Product state</option>
+                    <option value="bell">Bell pair</option>
+                    <option value="ghz">GHZ state</option>
+                  </select>
+                )}
+                <button onClick={runProtocol} disabled={loading}
+                  style={{ backgroundColor: '#0891b2', color: '#fff', border: 0, borderRadius: '4px', padding: '0.55rem 1rem', cursor: 'pointer' }}>
+                  {loading ? 'Running...' : 'Run protocol'}
+                </button>
+              </div>
+              {protocolResult && (
+                <pre style={{ whiteSpace: 'pre-wrap', color: '#cbd5e1', backgroundColor: '#030712', padding: '1rem', borderRadius: '6px', overflowX: 'auto' }}>
+                  {JSON.stringify(protocolResult, null, 2)}
+                </pre>
+              )}
+            </div>
           </div>
         )}
         {/* TAB 1: CIRCUIT STUDIO */}
