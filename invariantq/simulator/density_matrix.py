@@ -9,7 +9,7 @@ import numpy as np
 
 from .base import BaseSimulator, ExecutionResult
 from ..ir.qir import CircuitIR, GateOp, NoiseOp, ResetOp
-from ..core.binding import NativeDensityMatrix
+from ..core.binding import NativeDensityMatrix, native_core_status
 from ..noise.channels import build_kraus_channel
 
 class DensityMatrixSimulator(BaseSimulator):
@@ -95,6 +95,7 @@ class DensityMatrixSimulator(BaseSimulator):
                 "num_qubits": n,
                 "dimension": dim,
                 "trace": trace,
-                "purity": purity
+                "purity": purity,
+                "core": native_core_status(),
             }
         )

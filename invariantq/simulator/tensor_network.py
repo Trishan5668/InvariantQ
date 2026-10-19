@@ -10,7 +10,7 @@ import numpy as np
 
 from .base import BaseSimulator, ExecutionResult
 from ..ir.qir import CircuitIR, GateOp, MeasureOp
-from ..core.binding import NativeMPS, HAS_NATIVE_CORE
+from ..core.binding import NativeMPS, HAS_NATIVE_CORE, native_core_status
 
 class TensorNetworkSimulator(BaseSimulator):
     def __init__(self, max_bond_dim: int = 64, cutoff: float = 1e-12):
@@ -88,5 +88,7 @@ class TensorNetworkSimulator(BaseSimulator):
             backend_used="tensor_network",
             memory_used_bytes=mem_bytes,
             shots=shots,
-            metadata={"num_qubits": n, "max_bond_dim": self.max_bond_dim}
+            metadata={"num_qubits": n, "max_bond_dim": self.max_bond_dim,
+                      "algorithm": "native-mps" if HAS_NATIVE_CORE else "dense-statevector compatibility fallback",
+                      "core": native_core_status()}
         )

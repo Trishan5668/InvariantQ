@@ -1,5 +1,9 @@
 # Distributed Execution, Scheduling & Fault-Tolerance Architecture
 
+> Current validation covers the in-process scheduler and its fault-injection
+> fixtures only. It does not establish networked delivery or exactly-once
+> execution guarantees; see [VALIDATION_STATUS.md](VALIDATION_STATUS.md).
+
 INVARIANTQ's distributed engine enables execution across networked nodes with fault tolerance and statistical consistency (Cisco Systems, 2025; Caleffi et al., 2024).
 
 ## 1. Task Slicing & Seed Derivation

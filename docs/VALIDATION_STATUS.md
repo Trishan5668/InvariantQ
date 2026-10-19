@@ -11,6 +11,14 @@ From a source checkout with the declared dependencies installed:
 .\.venv\Scripts\python.exe -u scripts\run_benchmarks.py
 ```
 
+For the optional external differential checks, install the separate development
+requirements first:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest tests/test_qiskit_differential.py -q
+```
+
 The audit baseline was **18 passed, 33 failed**. Every failure was caused by the bindings looking only for `libinvariantq.so`, which is not loadable on Windows. The current suite result is **51 passed**.
 
 ## Traceability
@@ -24,11 +32,12 @@ The audit baseline was **18 passed, 33 failed**. Every failure was caused by the
 | CPTP channel conditions | `tests/test_noise_cptp.py`, `tests/test_algorithms_and_channels.py` | Verified for implemented channel fixtures |
 | Distributed scheduling and aggregation | `tests/test_noise_cptp.py`, `tests/test_acceptance_criteria.py` | Experimental: in-process worker model only |
 | Native C++ acceleration / large stabilizer scale | `core/`, `invariantq/core/binding.py` | Blocked on this Windows environment: only a Linux `.so` build path is supplied |
-| External Qiskit/Cirq/QuTiP differential testing | none | Missing (no independent external dependency was installed) |
+| External Qiskit statevector differential testing | `tests/test_qiskit_differential.py`; Qiskit 1.4.6 | Verified: five seeded 4-qubit circuits, global-phase-aware comparison at `1e-10` |
 
 ## Mathematical and operational limits
 
 - Global amplitudes use little-endian indexing (`q[k]` is global bit `k`); multi-qubit matrices retain listed-wire tensor order. Statevector result strings are formatted most-significant bit first. The stabilizer backend reports `q[0]` first for compatibility with its existing API.
+- Qiskit also uses little-endian global amplitudes, but treats its first multi-qubit `qargs` entry as the local matrix LSB. The Qiskit adapter reverses multi-qubit qargs to execute the same INVARIANTQ operation; this was independently verified on five deterministic seeded circuits.
 - The portable statevector fallback limits allocations to 24 qubits; the portable density-matrix fallback limits them to 12 qubits. These are explicit correctness/resource boundaries, not performance claims.
 - The portable `NativeMPS` and `NativeStabilizer` compatibility implementations use dense statevectors, so they do not provide the advertised polynomial/tableau or tensor-network scaling. They are suitable only within their stated fallback limits.
 - `StateVectorSimulator` rejects non-finite or non-unitary gate matrices. Invalid operations are not renormalized into plausible results.
@@ -47,5 +56,5 @@ The audit baseline was **18 passed, 33 failed**. Every failure was caused by the
 | Integration | Partial | CLI/tests exist; browser workflow not exercised in this audit |
 | Performance evidence | Experimental | Repeatable local benchmark script, not comparative evidence |
 | Security safeguards | Partial | Input/unitarity checks improved; no full security review |
-| Research reproducibility | Partial | Seeds/tests/ledger exist; no external differential reference installed |
+| Research reproducibility | Partial | Seeds/tests/ledger plus Qiskit statevector differential tests; density-matrix external comparison remains absent |
 | Release readiness | Blocked | Native cross-platform packaging and independent validation remain outstanding |

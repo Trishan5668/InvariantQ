@@ -1,5 +1,9 @@
 # INVARIANTQ Language (IQ-Lang) and Intermediate Representation (qIR) Specification
 
+> This is a semantic specification, not evidence that every described feature
+> is available on every backend. See [VALIDATION_STATUS.md](VALIDATION_STATUS.md)
+> for tested scope, platform limits, and experimental components.
+
 ## 1. Syntax Grammar (EBNF)
 
 The INVARIANTQ programming language (`IQ-Lang`) provides a statically-checked quantum-classical syntax with affine linear typing to enforce the quantum No-Cloning Theorem.

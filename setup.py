@@ -17,7 +17,7 @@ setup(
         ],
     },
     package_data={
-        "invariantq.core": ["libinvariantq.so"],
+        "invariantq.core": ["libinvariantq.so", "libinvariantq.dylib", "invariantq.dll", "libinvariantq.dll"],
     },
     include_package_data=True,
     python_requires=">=3.9",

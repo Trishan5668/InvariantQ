@@ -6,6 +6,7 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
+import platform
 from pathlib import Path
 from typing import List, Tuple, Optional
 import numpy as np
@@ -19,16 +20,36 @@ _LIB_DIRS = [
 ]
 
 _NATIVE_LIB = None
+_NATIVE_LOAD_ERRORS: List[str] = []
+if sys.platform == "win32":
+    _LIB_NAMES = ("invariantq.dll", "libinvariantq.dll")
+elif sys.platform == "darwin":
+    _LIB_NAMES = ("libinvariantq.dylib",)
+else:
+    _LIB_NAMES = ("libinvariantq.so",)
 for directory in _LIB_DIRS:
-    lib_path = directory / "libinvariantq.so"
-    if lib_path.exists():
-        try:
-            _NATIVE_LIB = ctypes.CDLL(str(lib_path))
-            break
-        except Exception as e:
-            pass
+    for name in _LIB_NAMES:
+        lib_path = directory / name
+        if lib_path.exists():
+            try:
+                _NATIVE_LIB = ctypes.CDLL(str(lib_path))
+                break
+            except OSError as exc:
+                _NATIVE_LOAD_ERRORS.append(f"{lib_path}: {exc}")
+    if _NATIVE_LIB is not None:
+        break
 
 HAS_NATIVE_CORE = _NATIVE_LIB is not None
+
+def native_core_status() -> dict:
+    """Return diagnostic information without pretending that fallback is native."""
+    return {
+        "active": HAS_NATIVE_CORE,
+        "implementation": "native-cpp" if HAS_NATIVE_CORE else "portable-numpy-fallback",
+        "platform": platform.platform(),
+        "library_names": list(_LIB_NAMES),
+        "load_errors": list(_NATIVE_LOAD_ERRORS),
+    }
 
 if HAS_NATIVE_CORE:
     # StateVector

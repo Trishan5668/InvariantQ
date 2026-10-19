@@ -10,7 +10,7 @@ import numpy as np
 
 from .base import BaseSimulator, ExecutionResult
 from ..ir.qir import CircuitIR, GateOp, MeasureOp, ResetOp, FusedGateOp
-from ..core.binding import NativeStateVector, HAS_NATIVE_CORE
+from ..core.binding import NativeStateVector, HAS_NATIVE_CORE, native_core_status
 
 class StateVectorSimulator(BaseSimulator):
     def __init__(self):
@@ -83,5 +83,5 @@ class StateVectorSimulator(BaseSimulator):
             backend_used="statevector",
             memory_used_bytes=mem_bytes,
             shots=shots,
-            metadata={"num_qubits": n, "dimension": 1 << n}
+            metadata={"num_qubits": n, "dimension": 1 << n, "core": native_core_status()}
         )

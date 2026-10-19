@@ -21,12 +21,13 @@ from invariantq.benchmarks.qpe import create_qpe_circuit
 from invariantq.benchmarks.randomized_benchmarking import run_randomized_benchmarking
 from invariantq.simulator.statevector import StateVectorSimulator
 from invariantq.reproducibility.ledger import ReproducibilityLedger
-from invariantq.core.binding import HAS_NATIVE_CORE
+from invariantq.core.binding import HAS_NATIVE_CORE, native_core_status
 
 def main():
     print("=" * 68)
     print("        INVARIANTQ RESEARCH PERFORMANCE BENCHMARK REPORT       ")
     print("=" * 68)
+    print(f"Active core: {native_core_status()['implementation']}")
 
     runner = BenchmarkRunner()
 

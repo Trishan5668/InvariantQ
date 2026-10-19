@@ -10,7 +10,7 @@ import numpy as np
 
 from .base import BaseSimulator, ExecutionResult
 from ..ir.qir import CircuitIR, GateOp, MeasureOp, ResetOp
-from ..core.binding import NativeStabilizer, HAS_NATIVE_CORE
+from ..core.binding import NativeStabilizer, HAS_NATIVE_CORE, native_core_status
 
 class StabilizerSimulator(BaseSimulator):
     def __init__(self):
@@ -64,7 +64,9 @@ class StabilizerSimulator(BaseSimulator):
                 counts=counts, probabilities=probs,
                 execution_time_ms=(time.perf_counter() - t0) * 1000.0,
                 backend_used="stabilizer", memory_used_bytes=mem_bytes, shots=shots,
-                metadata={"num_qubits": n, "tableau": "portable statevector fallback"},
+                metadata={"num_qubits": n, "tableau": "portable statevector fallback",
+                          "algorithm": "dense-statevector compatibility fallback",
+                          "core": native_core_status()},
             )
 
         # Run multiple shots with measurement collapse
@@ -148,5 +150,7 @@ class StabilizerSimulator(BaseSimulator):
             backend_used="stabilizer",
             memory_used_bytes=mem_bytes,
             shots=shots,
-            metadata={"num_qubits": n, "tableau": stab_repr}
+            metadata={"num_qubits": n, "tableau": stab_repr,
+                      "algorithm": "binary-tableau" if HAS_NATIVE_CORE else "dense-statevector compatibility fallback",
+                      "core": native_core_status()}
         )

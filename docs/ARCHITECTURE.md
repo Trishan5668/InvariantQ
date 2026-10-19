@@ -1,5 +1,10 @@
 # INVARIANTQ System Architecture
 
+> Validation note: this document describes intended component boundaries. Actual
+> validated capability, active native/fallback status, and known gaps are in
+> [VALIDATION_STATUS.md](VALIDATION_STATUS.md). The portable fallback is not a
+> scalable tableau or MPS implementation.
+
 INVARIANTQ implements an orchestrated hybrid stack combining C++ numerical kernels, Python orchestration, and a React + TypeScript user interface:
 
 ```

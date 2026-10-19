@@ -1,0 +1,4 @@
+# Optional development-only dependencies. They are deliberately not installed
+# by setup.py or requirements.txt because normal INVARIANTQ execution does not
+# require an external quantum framework.
+qiskit==1.4.6
