@@ -55,7 +55,16 @@ class FaultInjectionTester:
             "healthy_passed": healthy_passed,
             "flawed_passed": flawed_passed,
             "bug_caught": bug_caught,
-            "flawed_details": "Corrupted gate rejected: matrix fails U†U = I" if not is_unitary else "unexpectedly unitary"
+            "flawed_details": "Corrupted gate rejected: matrix fails U†U = I" if not is_unitary else "unexpectedly unitary",
+            "metadata": {
+                "validation": "unitarity",
+                "trace_error": (
+                    "StateVectorSimulator rejected the injected gate before execution: "
+                    "U†U is not equal to I"
+                    if not is_unitary
+                    else None
+                ),
+            },
         }
 
     def test_broken_cptp_channel_detection(self) -> Dict[str, Any]:

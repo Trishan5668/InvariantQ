@@ -18,6 +18,10 @@ class StabilizerSimulator(BaseSimulator):
 
     def run(self, circuit: CircuitIR, shots: int = 1024, seed: int = 42) -> ExecutionResult:
         t0 = time.perf_counter()
+        if isinstance(shots, bool) or not isinstance(shots, (int, np.integer)) or shots <= 0:
+            raise ValueError("shots must be a positive integer")
+        if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)) or seed < 0:
+            raise ValueError("seed must be a non-negative integer")
         n = circuit.num_qubits
 
         # Check if circuit is strictly Clifford

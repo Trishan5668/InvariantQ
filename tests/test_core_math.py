@@ -67,3 +67,26 @@ def test_measurement_collapse():
     amps = sv.get_amplitudes()
     assert np.isclose(amps[0], 1.0)
     assert np.isclose(amps[1], 0.0)
+
+
+def test_fallback_stabilizer_and_mps_are_not_dense_statevectors():
+    from invariantq.core import binding
+
+    if binding.HAS_NATIVE_CORE:
+        pytest.skip("portable fallback implementation is inactive when the native core is loaded")
+
+    assert not issubclass(binding.NativeStabilizer, binding.NativeStateVector)
+    assert not issubclass(binding.NativeMPS, binding.NativeStateVector)
+
+    stabilizer = binding.NativeStabilizer(3)
+    assert stabilizer._x.dtype == np.uint8
+    assert stabilizer._z.dtype == np.uint8
+    assert stabilizer._r.dtype == np.uint8
+    assert stabilizer.tableau_memory_bytes == stabilizer._x.nbytes + stabilizer._z.nbytes + stabilizer._r.nbytes
+
+    mps = binding.NativeMPS(3, max_bond_dim=2)
+    assert all(tensor.ndim == 3 for tensor in mps.site_tensors)
+    assert mps.memory_bytes == sum(tensor.nbytes for tensor in mps.site_tensors)
+    assert mps.is_approximate is False
+    with pytest.raises(ValueError, match="limited to"):
+        binding.NativeMPS(21).to_statevector()
